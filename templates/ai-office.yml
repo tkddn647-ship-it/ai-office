@@ -1,0 +1,38 @@
+# 각 레포의 .github/workflows/ai-office.yml — 이 파일은 거의 바뀔 일이 없다.
+# 실제 동작은 중앙 레포 tkddn647-ship-it/ai-office 에 있고, 레포별 설정은 office/config.yaml 에 있다.
+name: AI Office
+
+on:
+  issues:
+    types: [labeled]               # 이슈에 ai-office 라벨
+  issue_comment:
+    types: [created]               # PR(또는 그 이슈)에 /ai-office fix
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "처리할 이슈 번호 (새 작업)"
+        required: false
+      pr_number:
+        description: "고칠 PR 번호 (수정 라운드)"
+        required: false
+
+concurrency:
+  group: ai-office
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  office:
+    # /ai-office fix 는 저장소 소유자·협업자 댓글만 (공개 레포에서 남이 실행시키는 것 방지)
+    if: >-
+      (github.event_name == 'issues' && github.event.label.name == 'ai-office') ||
+      (github.event_name == 'issue_comment' &&
+       startsWith(github.event.comment.body, '/ai-office fix') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      github.event_name == 'workflow_dispatch'
+    uses: tkddn647-ship-it/ai-office/.github/workflows/office.yml@main
+    secrets: inherit

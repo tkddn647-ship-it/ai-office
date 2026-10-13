@@ -1,0 +1,102 @@
+# AI Office 본체 워크플로 (재사용형). 각 레포의 .github/workflows/ai-office.yml 이 이걸 부른다.
+# 레포별 차이(설치할 것, 엔진, 규칙)는 그 레포의 office/config.yaml 에만 둔다.
+name: AI Office (core)
+
+on:
+  workflow_call:
+    inputs:
+      core_ref:
+        description: "본체 버전 (브랜치·태그)"
+        type: string
+        default: main
+
+jobs:
+  office:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # 댓글을 달 이슈/PR 번호. 수정 라운드면 PR(또는 이슈) 번호
+      TARGET_NUMBER: ${{ github.event.issue.number || github.event.inputs.pr_number || github.event.inputs.issue_number }}
+      AI_OFFICE_FIX_PR: ${{ (github.event_name == 'issue_comment' && github.event.issue.number) || github.event.inputs.pr_number || '' }}
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      # 실행을 일으킨 댓글 본문 (셸에 직접 넣지 않고 환경변수로만)
+      AI_OFFICE_FIX_REQUEST: ${{ github.event.comment.body }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Announce start
+        if: env.TARGET_NUMBER != ''
+        run: |
+          if [ -n "$AI_OFFICE_FIX_PR" ]; then WHAT="🔧 수정 라운드를 시작합니다"; else WHAT="🏃 작업을 시작합니다"; fi
+          gh api "repos/$GITHUB_REPOSITORY/issues/$TARGET_NUMBER/comments" \
+            -f body="$WHAT (보통 5~20분). 진행 상황: $RUN_URL" > /dev/null || true
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # 본체는 작업 폴더 밖으로 옮긴다 (AI 커밋에 섞이지 않게)
+      - uses: actions/checkout@v5
+        with:
+          repository: tkddn647-ship-it/ai-office
+          ref: ${{ inputs.core_ref }}
+          path: .ai-office-core
+      - name: Stage
+        run: |
+          mv .ai-office-core "$RUNNER_TEMP/core"
+          test -f office/config.yaml || { echo "::error::office/config.yaml 이 없습니다"; exit 1; }
+          cp -r office "$RUNNER_TEMP/repo-office"
+          mkdir -p "$RUNNER_TEMP/ai-office-logs"
+          echo "AI_OFFICE_REPO_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "AI_OFFICE_CONFIG_DIR=$RUNNER_TEMP/repo-office" >> "$GITHUB_ENV"
+          echo "AI_OFFICE_LOG_DIR=$RUNNER_TEMP/ai-office-logs" >> "$GITHUB_ENV"
+          echo "OFFICE=$RUNNER_TEMP/core/office/orchestrator.py" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install AI tools
+        run: |
+          pip install -q pyyaml
+          python "$OFFICE" --needs-engine claude && npm install -g -s @anthropic-ai/claude-code
+          if python "$OFFICE" --needs-engine cursor; then
+            curl https://cursor.com/install -fsS | bash
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"; echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
+          fi
+          python "$OFFICE" --needs-engine gemini && npm install -g -s @google/gemini-cli
+          true
+
+      - name: Check tools
+        run: |
+          python "$OFFICE" --needs-engine claude && claude --version
+          python "$OFFICE" --needs-engine cursor && cursor-agent --version
+          python "$OFFICE" --needs-engine gemini && gemini --version
+          true
+
+      - name: Repo setup (config의 setup_commands)
+        run: python "$OFFICE" --hook setup
+
+      - name: Run AI Office
+        run: python "$OFFICE"
+
+      - name: Report failure
+        if: failure() && env.TARGET_NUMBER != ''
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$TARGET_NUMBER/comments" \
+            -f body="❌ AI Office 실행이 실패했습니다. 빨간 단계의 로그를 확인하세요: $RUN_URL" > /dev/null || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-office-logs
+          path: ${{ runner.temp }}/ai-office-logs/
+          if-no-files-found: ignore

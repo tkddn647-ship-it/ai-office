@@ -71,14 +71,13 @@ jobs:
             curl https://cursor.com/install -fsS | bash
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"; echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
           fi
-          python "$OFFICE" --needs-engine gemini && npm install -g -s @google/gemini-cli
+          # gemini는 설치할 것 없음 (본체가 Gemini API를 직접 호출)
           true
 
       - name: Check tools
         run: |
           python "$OFFICE" --needs-engine claude && claude --version
           python "$OFFICE" --needs-engine cursor && cursor-agent --version
-          python "$OFFICE" --needs-engine gemini && gemini --version
           true
 
       - name: Repo setup (config의 setup_commands)

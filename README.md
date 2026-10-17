@@ -11,7 +11,7 @@ GitHub 이슈에 `ai-office` 라벨을 붙이면 AI 여러 개가 역할을 나�
 |--|--|--|
 | Planner | Claude (`claude -p`) | 이슈를 작업 1~N개로 쪼갬, 모르면 질문 |
 | Builder | Cursor (`cursor-agent -p`) | 작업마다 파일 수정, 작업마다 커밋 |
-| Reviewer | Claude 또는 **Gemini** (`gemini -p`) | diff·테스트 결과 검토 → `APPROVE` / `REQUEST_CHANGES` |
+| Reviewer | Claude 또는 **Gemini** (API 직접 호출) | diff·테스트 결과 검토 → `APPROVE` / `REQUEST_CHANGES` |
 | Fixer | (Builder 엔진) | PR 댓글의 수정 요청 반영 |
 
 엔진은 레포마다 `office/config.yaml`에서 고른다. 엔진이 실패하면(키 없음, 한도) `fallback_engine`으로 대신 실행한다.
@@ -68,10 +68,14 @@ roles:
 
 ## Gemini를 쓸 때 주의
 
-- **무료 등급 약관**: Google이 입력·출력을 서비스 개선에 쓰고 사람 검토자가 볼 수 있다. 개인정보·기밀을 보내지 말 것.
-  → 자소서·개인정보 레포는 `gemini_allowed: false`.
-- Reviewer에는 `--approval-mode default`로 실행한다. 헤드리스에선 승인이 필요한 도구(쓰기·셸)가 막힌다.
-  읽기 도구(파일 읽기·검색)를 실제로 쓰는지는 **아직 실제 실행으로 확인 안 함** — 안 되면 프롬프트의 diff만 보고 리뷰한다.
+- **AI Studio API 키(`GEMINI_API_KEY`)로 Gemini API를 직접 호출**한다 (Gemini CLI 안 씀).
+  Gemini CLI는 2026-06-18부터 무료 등급·Google AI Pro/Ultra 구독 요청을 받지 않는다 (유료 API 키만).
+  → **Gemini 앱 구독(AI Pro)은 여기서 쓸 수 없다.** 무료 또는 결제한 AI Studio 키가 필요하다.
+- 도구가 없어 **글만 내는 역할(reviewer, planner)에만** 쓴다. diff는 프롬프트에 들어간다. builder에는 못 쓴다 (시작 시 막음).
+- 무료 한도는 **모델별 하루 요청 수** (예: gemini-3.8-flash 하루 20회, 2026-10 실측). 429(한도)면 바로 `fallback_engine`으로.
+  기본 모델 `gemini-flash-latest`, 바꾸려면 role의 `model`.
+- **무료 등급 약관**: 입력·출력이 서비스 개선에 쓰이고 사람 검토자가 볼 수 있다. 개인정보·기밀을 보내지 말 것.
+  → 자소서·개인정보 레포는 `gemini_allowed: false` (키 프로젝트에 결제를 켜 유료 등급이면 해당 없음).
 
 ## 로컬에서 돌려 보기
 
@@ -87,4 +91,4 @@ python orchestrator.py --hook setup            # setup_commands만 실행
 - 프롬프트가 100 KB를 넘으면 본문을 표준입력으로 넘긴다 (리눅스 인자 하나 128 KB 제한).
 - 사람 확인이 필요한 PR(리뷰 반려·테스트 실패·작업 실패)은 Draft + `needs-human` 라벨.
 - 수정 라운드(`/ai-office fix …`)는 소유자·협업자 댓글만. 머지된 PR이면 후속 PR을 만든다.
-- PR 본문에 역할별 사용량 표 (Cursor·Gemini CLI가 토큰 수를 안 주면 `-`).
+- PR 본문에 역할별 사용량 표 (Cursor CLI가 토큰 수를 안 주면 `-`).

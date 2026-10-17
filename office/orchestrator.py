@@ -103,35 +103,57 @@ def run_cursor(prompt: str, role: dict) -> str:
     return _run_engine(cmd, role, "cursor", stdin)
 
 
+GEMINI_URL = os.environ.get("GEMINI_API_URL") or \
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_DEFAULT_MODEL = "gemini-flash-latest"
+
+
 def run_gemini(prompt: str, role: dict) -> str:
-    """Gemini CLI (@google/gemini-cli). 인증: GEMINI_API_KEY.
-    approval-mode default + 헤드리스 → 승인이 필요한 도구(파일 쓰기·셸)는 실행되지 않는다. 리뷰어(읽기 전용)용."""
-    if not os.environ.get("GEMINI_API_KEY"):
+    """Gemini API를 직접 호출 (REST). 인증: GEMINI_API_KEY (AI Studio 키, 무료·유료 모두).
+    Gemini CLI는 2026-06-18부터 무료 등급·AI Pro/Ultra 구독 요청을 받지 않아 쓰지 않는다.
+    도구(파일 읽기·수정)가 없으므로 글만 내는 역할(리뷰어·기획)용. 프롬프트에 diff가 들어 있다."""
+    import urllib.error
+    import urllib.request
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
         raise RuntimeError("gemini: GEMINI_API_KEY 가 없습니다 (레포 Secrets에 등록)")
-    arg, stdin = _prompt_args(prompt)
-    cmd = ["gemini", "-p", arg, "--output-format", "json",
-           "--approval-mode", role.get("approval_mode", "default")]
-    if role.get("model"):
-        cmd += ["-m", role["model"]]
-    cmd += role.get("extra_args", [])
-    return _run_engine(cmd, role, "gemini", stdin)
-
-
-def _gemini_usage(stats: dict) -> dict:
-    """Gemini CLI stats에서 토큰 수를 뽑는다 (구조가 버전마다 달라 너그럽게 합산)."""
-    tot = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}
-    keys = {"prompt": "input_tokens", "input": "input_tokens", "candidates": "output_tokens",
-            "output": "output_tokens", "cached": "cache_read_input_tokens"}
-
-    def walk(o):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                if k in keys and isinstance(v, (int, float)):
-                    tot[keys[k]] += int(v)
-                else:
-                    walk(v)
-    walk(stats or {})
-    return {k: v for k, v in tot.items() if v}
+    model = role.get("model") or GEMINI_DEFAULT_MODEL
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
+    timeout = role.get("timeout_sec", 900)
+    data = None
+    for attempt in range(2):   # 503(일시 과부하)만 한 번 더. 429(한도)는 바로 대체 엔진으로
+        req = urllib.request.Request(GEMINI_URL.format(model=model), data=body, method="POST",
+                                     headers={"Content-Type": "application/json", "x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode(errors="replace")
+            try:
+                msg = json.loads(raw)["error"]["message"].split(" For more information")[0]
+            except Exception:  # noqa: BLE001
+                msg = raw[:300]
+            if e.code in (500, 503) and attempt == 0:
+                time.sleep(20)
+                continue
+            raise RuntimeError(f"gemini 실패 (HTTP {e.code}, 모델 {model}): {msg[:500]}")
+        except (urllib.error.URLError, OSError) as e:
+            raise RuntimeError(f"gemini 연결 실패: {type(e).__name__}: {e}")
+    cands = (data or {}).get("candidates") or []
+    if not cands:
+        raise RuntimeError(f"gemini 응답 없음: {json.dumps((data or {}).get('promptFeedback', data), ensure_ascii=False)[:300]}")
+    text = "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []))
+    u = data.get("usageMetadata") or {}
+    usage = {k: v for k, v in {"input_tokens": u.get("promptTokenCount"),
+                               "output_tokens": u.get("candidatesTokenCount"),
+                               "cache_read_input_tokens": u.get("cachedContentTokenCount")}.items() if v}
+    _last_meta.clear()
+    _last_meta.update(usage=usage, cost=None, turns=None)
+    log(f"  gemini({model}) 완료 · usage={usage}")
+    if cands[0].get("finishReason") == "MAX_TOKENS":
+        text += "\n\n> ⚠ Gemini 출력 길이 한도로 잘림"
+    return text
 
 
 def _run_engine(cmd: list[str], role: dict, engine: str, stdin: str | None = None) -> str:
@@ -150,15 +172,6 @@ def _run_engine(cmd: list[str], role: dict, engine: str, stdin: str | None = Non
         if p.returncode != 0:
             raise RuntimeError(f"{engine} 실패 (exit {p.returncode}):\n{(p.stderr or out)[-2000:]}")
         return out  # 일부 버전은 JSON 대신 텍스트
-
-    if engine == "gemini":  # {"response": ..., "stats": {...}, "error": {...}}
-        if p.returncode != 0 or data.get("error"):
-            err = json.dumps(data["error"], ensure_ascii=False)[:1500] if data.get("error") else p.stderr[-1500:]
-            raise RuntimeError(f"gemini 실패 (exit {p.returncode}): {err}")
-        _last_meta.clear()
-        _last_meta.update(usage=_gemini_usage(data.get("stats")), cost=None, turns=None)
-        log(f"  gemini 완료 · usage={_last_meta['usage']}")
-        return data.get("response", "")
 
     if p.returncode != 0 or data.get("is_error"):
         raise RuntimeError(
@@ -191,6 +204,9 @@ def check_policy(cfg: dict) -> None:
     (Gemini 무료 등급은 약관상 사람 검토자가 입력·출력을 볼 수 있고, 개인정보 전송 금지)"""
     if cfg.get("gemini_allowed", True) is False and "gemini" in engines_needed(cfg):
         sys.exit("이 레포는 gemini_allowed: false 인데 config.yaml에 gemini 역할이 있습니다. 개인정보 보호를 위해 중단합니다.")
+    b = (cfg.get("roles") or {}).get("builder") or {}
+    if "gemini" in (b.get("engine"), b.get("fallback_engine")):
+        sys.exit("builder에 gemini는 쓸 수 없습니다 (파일을 고치는 도구가 없음). builder는 claude 또는 cursor로.")
 
 
 def call(role_name: str, prompt: str, cfg: dict) -> str:

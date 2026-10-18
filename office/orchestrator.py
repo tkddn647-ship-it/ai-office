@@ -84,6 +84,9 @@ def _prompt_args(prompt: str) -> tuple[str, str | None]:
 
 def run_claude(prompt: str, role: dict) -> str:
     """Claude Code CLI. 인증: CLAUDE_CODE_OAUTH_TOKEN(구독) 또는 ANTHROPIC_API_KEY."""
+    if not (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")):
+        raise RuntimeError("claude: 인증 정보가 비어 있습니다. 레포 Settings → Secrets → Actions에 CLAUDE_CODE_OAUTH_TOKEN이 있는지, "
+                           "다른 계정의 본체를 부른다면 워크플로에서 secrets를 이름으로 넘기는지 확인하세요 (secrets: inherit는 같은 조직만 전달됨)")
     arg, stdin = _prompt_args(prompt)
     cmd = ["claude", "-p", arg, "--output-format", "json", "--max-turns", str(role.get("max_turns", 8))]
     if role.get("model"):

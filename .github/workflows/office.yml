@@ -9,6 +9,17 @@ on:
         description: "본체 버전 (브랜치·태그)"
         type: string
         default: main
+    # 다른 계정의 레포가 부를 때는 secrets: inherit 가 전달되지 않는다 (같은 조직·엔터프라이즈만).
+    # 그때는 호출 쪽에서 아래 이름으로 직접 넘긴다. 같은 계정 레포는 inherit 그대로 써도 된다.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      CURSOR_API_KEY:
+        required: false
+      GEMINI_API_KEY:
+        required: false
 
 jobs:
   office:

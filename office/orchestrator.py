@@ -384,7 +384,7 @@ def post_build(cfg: dict) -> None:
         log(f"  정리: {cmd} → exit {p.returncode} {tail[0][:120]}")
 
 
-def build(plan_data: dict, cfg: dict, commit: bool) -> list[dict]:
+def build(plan_data: dict, cfg: dict, commit: bool, issue: dict | None = None) -> list[dict]:
     tpl = role_prompt("builder")
     tasks = plan_data["tasks"]
     reports = []
@@ -392,7 +392,8 @@ def build(plan_data: dict, cfg: dict, commit: bool) -> list[dict]:
         prompt = fill(tpl, project_notes=notes(cfg), summary=plan_data.get("summary", ""), task_id=t.get("id"),
                       task_count=len(tasks), title=t.get("title", ""),
                       files=", ".join(t.get("files", [])) or "(미지정)",
-                      instructions=t.get("instructions", ""), done_when=t.get("done_when", ""))
+                      instructions=t.get("instructions", ""), done_when=t.get("done_when", ""),
+                      issue_title=(issue or {}).get("title", ""), issue_body=(issue or {}).get("body") or "(본문 없음)")
         try:
             report = call("builder", prompt, cfg)
             ok = True
@@ -860,7 +861,7 @@ def main() -> int:
         sh(["git", "config", "user.email", "ai-office@users.noreply.github.com"], check=False)
         sh(["git", "checkout", "-b", branch])
 
-    reports = build(plan_data, cfg, commit=push)
+    reports = build(plan_data, cfg, commit=push, issue=issue)
     tests = run_tests(cfg)
     review_md = review(issue, plan_data, base, reports, tests, cfg)
     verdict = parse_verdict(review_md)

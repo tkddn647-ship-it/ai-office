@@ -681,7 +681,7 @@ def set_needs_human(number: int, needs_human: bool) -> None:
         gh_api(f"issues/{number}/labels/needs-human", method="DELETE", check=False)
 
 
-def resolve_fix_target(number: int, push: bool) -> int | None:
+def resolve_fix_target(number: int, push: bool, quiet: bool = False) -> int | None:
     """댓글이 달린 곳이 이슈면, 그 이슈로 만들어진 가장 최근 AI Office PR을 찾는다."""
     item = gh_api(f"issues/{number}")
     if "pull_request" in item:
@@ -697,14 +697,14 @@ def resolve_fix_target(number: int, push: bool) -> int | None:
         return None
     target = max(mine, key=lambda x: x["number"])["number"]
     log(f"이슈 #{number}의 댓글 → 이 이슈의 PR #{target}을 대상으로 진행")
-    if push:
+    if push and not quiet:
         gh_api(f"issues/{number}/comments", f"body=AI Office: 이 이슈의 PR #{target}을 대상으로 수정 라운드를 진행합니다. "
                f"결과는 PR #{target}(또는 후속 PR)에 남깁니다.", method="POST", check=False)
     return target
 
 
-def run_fix(number: int, cfg: dict, push: bool) -> int:
-    pr_number = resolve_fix_target(number, push)
+def run_fix(number: int, cfg: dict, push: bool, quiet: bool = False) -> int:
+    pr_number = resolve_fix_target(number, push, quiet)
     if pr_number is None:
         return 0
     pr = gh_api(f"pulls/{pr_number}")
@@ -780,12 +780,15 @@ def run_fix(number: int, cfg: dict, push: bool) -> int:
         sh(["git", "add", "-A"])
         sh(["git", "commit", "-m", f"ai-office: 수정 라운드 {done_rounds + 1} (PR #{pr_number})"])
     reports = [{"task": task, "ok": ok, "changed": changed, "report": report}]
+    say("dev", chat_line(report) or ("고쳤습니다." if changed else "바꿀 곳을 찾지 못했습니다."))
 
     tests = run_tests(cfg)
+    say_tests(tests)
     plan_data = {"mode": "PR 수정 라운드 — 아래 '이전 리뷰' 지적과 사람 지시를 고쳤는지 확인할 것",
                  "human_request": human_request, "previous_review": latest_review[:4000]}
     review_md = review(issue, plan_data, f"origin/{base}", reports, tests, cfg)
     verdict = parse_verdict(review_md)
+    say_review(review_md, verdict)
     needs_human, banner = status_banner(verdict, reports, tests)
     if not changed:
         needs_human = True
@@ -825,6 +828,8 @@ def run_fix(number: int, cfg: dict, push: bool) -> int:
         sh(["git", "push", "origin", f"HEAD:{head}"])
     gh_api(f"issues/{pr_number}/comments", f"body={body[:60000]}", method="POST")
     set_needs_human(pr_number, needs_human)
+    say("lead", f"PR #{pr_number}에 수정 라운드 결과를 올렸습니다. " +
+        ("확인이 필요한 점이 남아 있습니다." if needs_human else "리뷰 승인·테스트 통과입니다.") + " 병합은 직접 해 주세요.")
     title = re.sub(r"^\[AI Office[^\]]*\]\s*", "", pr["title"])
     gh_api(f"pulls/{pr_number}", f"title={'[AI Office · 확인 필요] ' if needs_human else '[AI Office] '}{title}",
            method="PATCH", check=False)
@@ -899,7 +904,7 @@ def run_chat(number: int, who: str, text: str, cfg: dict, push: bool) -> int | N
     if pr:
         say("lead", f"알겠습니다. PR #{pr}에 반영하도록 개발에게 넘깁니다.")
         os.environ["AI_OFFICE_FIX_REQUEST"] = f"{FIX_COMMAND} {text}"
-        return run_fix(number, cfg, push)
+        return run_fix(number, cfg, push, quiet=True)
     say("lead", "확인했습니다. 이 이슈로 작업을 시작합니다.")
     return None
 
@@ -966,6 +971,7 @@ def main() -> int:
             return r
         os.environ["ISSUE_NUMBER"] = str(fix_pr)   # PR이 없는 이슈 → 새 작업으로
     elif fix_pr:
+        chat_setup(cfg, fix_pr, not args.no_push)
         return run_fix(fix_pr, cfg, push=not args.no_push)
     issue = load_issue(args)
     log(f"이슈 #{issue['number']}: {issue['title']} (댓글 {len(issue['comments'])}개)")

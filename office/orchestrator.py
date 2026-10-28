@@ -314,7 +314,8 @@ def fetch_comments(number: int) -> list[dict]:
         if not (is_bot or trusted):
             skipped += 1
             continue
-        out.append({"human": trusted and not is_bot and QUESTION_MARKER not in body and FIX_MARKER not in body,
+        out.append({"human": trusted and not is_bot and QUESTION_MARKER not in body and FIX_MARKER not in body
+                    and CHAT_MARKER not in body,
                     "author": (c.get("user") or {}).get("login", "?"), "body": body})
     if skipped:
         log(f"  권한 없는 사용자의 댓글 {skipped}개는 무시합니다")
@@ -343,10 +344,74 @@ def ensure_label(name: str, color: str, desc: str) -> None:
     gh_api("labels", f"name={name}", f"color={color}", f"description={desc}", method="POST", check=False)
 
 
+# ---------- 회사 채팅 (이슈 댓글로 역할별로 말한다) ----------
+
+CHAT_MARKER = "<!-- ai-office:chat -->"
+MEMORY_LABEL = "ai-office-memory"
+PERSONAS = {"lead": "🧑‍💼 팀장", "dev": "👷 개발", "review": "🔍 리뷰", "test": "🧪 테스트"}
+MENTIONS = {"@팀장": "lead", "@개발": "dev", "@리뷰": "review"}
+MEMORY_HINT = re.compile(r"기억|앞으로|다음부터|다음엔|다음에는|항상|규칙으로")
+_chat = {"n": 0, "on": False}
+
+
+def chat_setup(cfg: dict, number: int, push: bool) -> None:
+    _chat.update(n=number or 0, on=bool(push and number and cfg.get("chat", True)))
+
+
+def say(who: str, text: str) -> None:
+    """역할 이름으로 이슈에 한 줄 남긴다. 로컬 모드·chat: false면 로그에만."""
+    text = (text or "").strip()
+    if not text:
+        return
+    log(f"[{PERSONAS[who]}] {text[:200]}")
+    if _chat["on"]:
+        gh_api(f"issues/{_chat['n']}/comments", f"body={CHAT_MARKER}\n**{PERSONAS[who]}** {text[:3000]}",
+               method="POST", check=False)
+
+
+def chat_line(output: str) -> str:
+    """에이전트 출력 끝의 `CHAT: ...` 한 줄 (역할 지시문이 남기라고 시킴)."""
+    m = re.findall(r"^\s*CHAT:\s*(.+)$", output or "", re.M)
+    return m[-1].strip() if m else ""
+
+
+def memory_issue(create: bool = False) -> int | None:
+    found = gh_api(f"issues?labels={MEMORY_LABEL}&state=open&per_page=1", check=False) or []
+    if found:
+        return found[0]["number"]
+    if not create:
+        return None
+    ensure_label(MEMORY_LABEL, "5319e7", "AI Office: 팀 메모 (@팀장에게 남긴 규칙)")
+    i = gh_api("issues", "title=🧠 AI Office 팀 메모",
+               "body=이슈나 PR에서 `@팀장 앞으로 …`처럼 남긴 규칙이 여기 쌓이고, 모든 역할이 매번 읽습니다. "
+               "지우고 싶은 규칙은 댓글을 지우면 됩니다.", f"labels[]={MEMORY_LABEL}", method="POST", check=False)
+    return (i or {}).get("number")
+
+
+_memory_cache: str | None = None
+
+
+def load_memory() -> str:
+    global _memory_cache
+    if _memory_cache is None:
+        n = memory_issue() if os.environ.get("GITHUB_ACTIONS") else None
+        items = [c["body"] for c in fetch_comments(n)] if n else []
+        _memory_cache = "\n".join(f"- {b.strip()[:500]}" for b in items[-30:])
+    return _memory_cache
+
+
+def remember(text: str, where: int) -> None:
+    n = memory_issue(create=True)
+    if n:
+        gh_api(f"issues/{n}/comments", f"body={text} (#{where}에서)", method="POST", check=False)
+
+
 # ---------- 단계 ----------
 
 def notes(cfg: dict) -> str:
-    return (cfg.get("project_notes") or "").strip() or "(없음)"
+    base = (cfg.get("project_notes") or "").strip() or "(없음)"
+    mem = load_memory()
+    return base + (f"\n\n--- 팀 메모 (사람이 @팀장에게 남긴 규칙, 반드시 지킬 것) ---\n{mem}" if mem else "")
 
 
 def extract_json(text: str) -> dict:
@@ -406,6 +471,8 @@ def build(plan_data: dict, cfg: dict, commit: bool, issue: dict | None = None) -
             sh(["git", "add", "-A"])
             sh(["git", "commit", "-m", f"ai-office: task {t.get('id')} - {t.get('title', '')}"])
         reports.append({"task": t, "ok": ok, "changed": changed, "report": report})
+        say("dev", f"작업 {t.get('id')} " + (chat_line(report) or ("끝냈습니다." if ok and changed else
+                                                                  "바뀐 파일이 없습니다." if ok else "실패했습니다.")))
     return reports
 
 
@@ -535,7 +602,10 @@ def pr_body(issue: dict, plan_data: dict, reports: list[dict], tests: list[dict]
     if n:
         lines.append(f"Closes #{n}" if base == default_branch() else
                      f"이슈 #{n} (작업 브랜치 `{base}`로 머지돼도 이슈는 자동으로 닫히지 않으니 직접 닫아 주세요)")
-    lines += ["", f"**요약:** {plan_data.get('summary', '')}", "", "### 작업 결과"]
+    lines += ["", f"**요약:** {plan_data.get('summary', '')}"]
+    if plan_data.get("auto_rounds"):
+        lines.append(f"**자동 수정:** 테스트·리뷰 결과를 보고 {plan_data['auto_rounds']}번 스스로 고쳤습니다.")
+    lines += ["", "### 작업 결과"]
     for r in reports:
         mark = "✅" if r["ok"] and r["changed"] else ("⚠️ 변경 없음" if r["ok"] else "❌ 실패")
         lines.append(f"- {mark} **{r['task'].get('id')}. {r['task'].get('title', '')}**")
@@ -762,6 +832,68 @@ def run_fix(number: int, cfg: dict, push: bool) -> int:
     return 0
 
 
+# ---------- 자동 수정 반복 (사람 없이 테스트 실패·리뷰 지적을 고침) ----------
+
+def auto_fix(issue: dict, review_md: str, tests: list[dict], cfg: dict, commit: bool, rnd: int) -> dict:
+    prompt = fill(role_prompt("fixer"), project_notes=notes(cfg), issue_number=issue["number"],
+                  issue_title=issue["title"], issue_body=issue["body"] or "(없음)",
+                  human_request="(자동 수정 라운드: 사람 지시 없음 — 실패한 테스트와 리뷰 지적을 고칠 것)",
+                  latest_review=review_md[:6000], latest_tests=format_tests(tests)[:4000])
+    task = {"id": f"auto{rnd}", "title": f"자동 수정 {rnd}"}
+    try:
+        report, ok = call("builder", prompt, cfg), True
+    except RuntimeError as e:
+        report, ok = str(e), False
+    post_build(cfg)
+    changed = bool(sh(["git", "status", "--porcelain"]).stdout.strip())
+    if commit and changed:
+        sh(["git", "add", "-A"])
+        sh(["git", "commit", "-m", f"ai-office: 자동 수정 {rnd}"])
+    return {"task": task, "ok": ok, "changed": changed, "report": report}
+
+
+def say_tests(tests: list[dict]) -> None:
+    if not tests:
+        say("test", "돌릴 테스트가 설정돼 있지 않습니다.")
+        return
+    bad = [t for t in tests if not t["ok"]]
+    say("test", f"테스트 {len(tests)}개 중 {len(tests) - len(bad)}개 통과." +
+        ("" if not bad else " 실패: " + ", ".join(f"`{t['cmd']}`" for t in bad)))
+
+
+def say_review(review_md: str, verdict: str) -> None:
+    m = re.search(r"^#+\s*판정 이유\s*\n+(.+)$", review_md or "", re.M)
+    line = chat_line(review_md) or (m.group(1).strip() if m else "")
+    say("review", ("승인합니다. " if verdict == "APPROVE" else "수정이 필요합니다. ") + line)
+
+
+def find_ai_pr(number: int) -> int | None:
+    item = gh_api(f"issues/{number}", check=False) or {}
+    if "pull_request" in item:
+        return number
+    prs = gh_api("pulls?state=all&per_page=100&sort=created&direction=desc", check=False) or []
+    mine = [x for x in prs if x["head"]["ref"].startswith(f"ai-office/issue-{number}-")
+            and (x.get("state") == "open" or x.get("merged_at"))]
+    return max(mine, key=lambda x: x["number"])["number"] if mine else None
+
+
+def run_chat(number: int, who: str, text: str, cfg: dict, push: bool) -> int | None:
+    """@팀장/@개발/@리뷰 댓글. 규칙이면 팀 메모에 저장, PR이 있으면 수정 라운드, 없으면 None (새 작업으로 진행)."""
+    chat_setup(cfg, number, push)
+    if who == "lead" and MEMORY_HINT.search(text):
+        if push:
+            remember(text, number)
+        say("lead", f"기억했습니다. 다음 작업부터 모든 역할이 이 규칙을 읽습니다: “{text[:200]}”")
+        return 0
+    pr = find_ai_pr(number) if push else None
+    if pr:
+        say("lead", f"알겠습니다. PR #{pr}에 반영하도록 개발에게 넘깁니다.")
+        os.environ["AI_OFFICE_FIX_REQUEST"] = f"{FIX_COMMAND} {text}"
+        return run_fix(number, cfg, push)
+    say("lead", "확인했습니다. 이 이슈로 작업을 시작합니다.")
+    return None
+
+
 # ---------- 메인 ----------
 
 def load_issue(args) -> dict:
@@ -816,10 +948,18 @@ def main() -> int:
         return run_setup(cfg)
     check_policy(cfg)
     fix_pr = args.fix_pr or int(os.environ.get("AI_OFFICE_FIX_PR") or 0)  # 이슈 번호여도 됨 (PR을 찾아감)
-    if fix_pr:
+    trigger = (os.environ.get("AI_OFFICE_FIX_REQUEST") or "").strip()
+    mention = next((m for m in MENTIONS if trigger.startswith(m)), None)
+    if mention and fix_pr:
+        r = run_chat(fix_pr, MENTIONS[mention], trigger[len(mention):].strip(), cfg, push=not args.no_push)
+        if r is not None:
+            return r
+        os.environ["ISSUE_NUMBER"] = str(fix_pr)   # PR이 없는 이슈 → 새 작업으로
+    elif fix_pr:
         return run_fix(fix_pr, cfg, push=not args.no_push)
     issue = load_issue(args)
     log(f"이슈 #{issue['number']}: {issue['title']} (댓글 {len(issue['comments'])}개)")
+    chat_setup(cfg, issue["number"], not args.no_push)
 
     base_branch = cfg.get("base_branch")
     if base_branch:
@@ -835,6 +975,9 @@ def main() -> int:
 
     plan_data = plan(issue, cfg)
     log(f"계획: 작업 {len(plan_data['tasks'])}개 · 막는 질문 {len(plan_data['questions'])}개 · 참고 {len(plan_data['notes'])}개")
+    if plan_data["tasks"] and not plan_data["questions"] and not args.plan_only:
+        say("lead", f"{plan_data.get('summary', '')} 작업 {len(plan_data['tasks'])}개로 나눴습니다: " +
+            " / ".join(f"{t.get('id')}. {t.get('title', '')}" for t in plan_data["tasks"]))
     if args.plan_only:
         print(json.dumps(plan_data, ensure_ascii=False, indent=2))
         return 0
@@ -863,8 +1006,35 @@ def main() -> int:
 
     reports = build(plan_data, cfg, commit=push, issue=issue)
     tests = run_tests(cfg)
+    say_tests(tests)
     review_md = review(issue, plan_data, base, reports, tests, cfg)
     verdict = parse_verdict(review_md)
+    say_review(review_md, verdict)
+
+    # 에이전트 반복: 테스트 실패나 리뷰 지적이 있으면 사람을 부르기 전에 스스로 고친다 (상한·호출 예산 안에서)
+    max_auto = int(cfg.get("max_auto_rounds", 2))
+    budget = int(cfg.get("max_calls", 12))
+    auto_done = 0
+    while auto_done < max_auto and (verdict != "APPROVE" or any(not t["ok"] for t in tests)):
+        if not any(r["changed"] for r in reports):
+            break
+        if len(USAGE) + 2 > budget:
+            say("lead", f"호출 예산 {budget}회에 가까워 자동 수정을 멈추고 사람 확인으로 넘깁니다.")
+            break
+        auto_done += 1
+        why = "테스트 실패" if any(not t["ok"] for t in tests) else "리뷰 수정 요청"
+        say("lead", f"{why}라 개발에게 다시 맡깁니다 (자동 수정 {auto_done}/{max_auto}).")
+        fix = auto_fix(issue, review_md, tests, cfg, commit=push, rnd=auto_done)
+        reports.append(fix)
+        say("dev", chat_line(fix["report"]) or ("고쳤습니다." if fix["changed"] else "바꿀 곳을 찾지 못했습니다."))
+        if not fix["changed"]:
+            break
+        tests = run_tests(cfg)
+        say_tests(tests)
+        review_md = review(issue, plan_data, base, reports, tests, cfg)
+        verdict = parse_verdict(review_md)
+        say_review(review_md, verdict)
+    plan_data["auto_rounds"] = auto_done
     needs_human, banner = status_banner(verdict, reports, tests)
     log(f"판정: {verdict} · 사람 확인 필요: {needs_human}")
     body = pr_body(issue, plan_data, reports, tests, review_md, banner, base) if push else \
@@ -884,6 +1054,8 @@ def main() -> int:
     sh(["git", "push", "-u", "origin", branch])
     url = create_pr(issue, branch, base, body, needs_human)
     log(f"PR 생성: {url}")
+    say("lead", f"PR 올렸습니다: {url} " + ("확인이 필요한 점이 남아 있어 초안으로 올렸습니다." if needs_human
+                                            else "리뷰 승인·테스트 통과입니다.") + " 병합은 직접 해 주세요.")
     return 0
 
 

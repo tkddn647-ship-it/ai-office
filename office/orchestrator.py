@@ -857,7 +857,16 @@ def say_tests(tests: list[dict]) -> None:
         say("test", "돌릴 테스트가 설정돼 있지 않습니다.")
         return
     bad = [t for t in tests if not t["ok"]]
-    say("test", f"테스트 {len(tests)}개 중 {len(tests) - len(bad)}개 통과." +
+    counts = []
+    for t in tests:   # pytest·unittest 요약 줄에서 개수를 읽는다 (없으면 명령 단위로)
+        m = re.search(r"(\d+) passed(?:, (\d+) failed)?|(\d+) failed(?:, (\d+) passed)?", t["tail"])
+        if m:
+            passed = int(m.group(1) or m.group(4) or 0); failed = int(m.group(2) or m.group(3) or 0)
+            counts.append(f"`{t['cmd']}` {passed}개 통과" + (f", {failed}개 실패" if failed else ""))
+    if counts:
+        say("test", " · ".join(counts) + ("" if not bad else " — 실패한 명령이 있습니다."))
+        return
+    say("test", f"테스트 명령 {len(tests)}개 중 {len(tests) - len(bad)}개 통과." +
         ("" if not bad else " 실패: " + ", ".join(f"`{t['cmd']}`" for t in bad)))
 
 
@@ -880,6 +889,7 @@ def find_ai_pr(number: int) -> int | None:
 def run_chat(number: int, who: str, text: str, cfg: dict, push: bool) -> int | None:
     """@팀장/@개발/@리뷰 댓글. 규칙이면 팀 메모에 저장, PR이 있으면 수정 라운드, 없으면 None (새 작업으로 진행)."""
     chat_setup(cfg, number, push)
+    text = re.split(r"\n-{3,}\s*\n", text)[0].strip()   # 서명·구분선 아래는 버린다
     if who == "lead" and MEMORY_HINT.search(text):
         if push:
             remember(text, number)

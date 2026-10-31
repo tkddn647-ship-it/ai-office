@@ -47,6 +47,15 @@ jobs:
           $p = Start-Process -FilePath dist\AIOfficeDesktop.exe -ArgumentList "--smoketest","--headless" -Wait -PassThru
           Get-Content "$env:APPDATA\AIOfficeDesktop\log.txt" -Tail 5 -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "smoketest failed: $($p.ExitCode)" }
+      - name: Cursor CLI 찾기 점검 (Windows 설치 위치에서 실제로 찾고 실행되는지)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          irm 'https://cursor.com/install?win32=true' | iex
+          python -c "from aio_desktop import providers as p; import subprocess; c=p.find_cursor_cli(); print('found', c); r=subprocess.run(c+['--version'],capture_output=True,text=True,timeout=120); print('version', r.returncode, r.stdout.strip()[:80], r.stderr.strip()[-200:])"
+          if ($env:CURSOR_API_KEY) { python -c "from aio_desktop import providers as p, os; print('reply', p.chat('cursor','',os.environ['CURSOR_API_KEY'],'Reply with JSON only.','Return {\"ok\": true}.',timeout=300)[0][:80])" } else { Write-Host "CURSOR_API_KEY 시크릿 없음: 실제 질문은 건너뜀" }
       - name: 설치 파일 만들기 (Inno Setup)
         shell: pwsh
         run: |

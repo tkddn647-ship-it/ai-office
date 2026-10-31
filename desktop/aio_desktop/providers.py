@@ -157,22 +157,60 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
         return text, usage
 
 
-def find_cursor_cli() -> str | None:
-    """Cursor CLI(cursor-agent) 위치. 설치: https://cursor.com/cli"""
+CURSOR_INSTALL_WIN = "irm 'https://cursor.com/install?win32=true' | iex"
+CURSOR_INSTALL_UNIX = "curl https://cursor.com/install -fsS | bash"
+
+
+def _cursor_root():
     import os
-    import shutil
     from pathlib import Path
-    for n in ("cursor-agent", "cursor-agent.cmd", "cursor-agent.exe", "agent"):
+    return Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData/Local")) / "cursor-agent"
+
+
+def find_cursor_cli() -> list[str] | None:
+    """Cursor CLI(명령 이름 agent) 실행 방법. 반환: 실행할 명령 앞부분 리스트.
+    Windows 설치 위치: %LOCALAPPDATA%\\cursor-agent\\agent.cmd (PATH에 없을 수 있음).
+    agent.cmd는 PowerShell 5.1을 거치며 인자의 따옴표·!를 망가뜨리는 문제가 알려져 있어,
+    가능하면 versions\\<버전>\\node.exe index.js 를 직접 부른다."""
+    import shutil
+    import sys
+    from pathlib import Path
+    if sys.platform == "win32":
+        root = _cursor_root()
+        vers = [d for d in (root / "versions").glob("*") if (d / "node.exe").is_file() and (d / "index.js").is_file()] if (root / "versions").is_dir() else []
+        if vers:
+            def vkey(d):
+                return (tuple(int(x) for x in re.findall(r"\d+", d.name)[:4]), d.stat().st_mtime)
+            d = max(vers, key=vkey)
+            return [str(d / "node.exe"), str(d / "index.js")]
+        for c in (root / "agent.cmd", root / "cursor-agent.cmd"):
+            if c.is_file():
+                return [str(c)]
+    for n in ("agent", "cursor-agent"):
         p = shutil.which(n)
-        if p and ("agent" in Path(p).name):
-            return p
-    home = Path.home()
-    for c in (home / ".local/bin/cursor-agent", home / ".cursor/bin/cursor-agent",
-              Path(os.environ.get("LOCALAPPDATA", "")) / "cursor-agent/cursor-agent.cmd",
-              Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/cursor-agent/cursor-agent.exe"):
-        if str(c) and c.is_file():
-            return str(c)
+        if p and Path(p).stem.lower() in ("agent", "cursor-agent"):
+            return [p]
+    for c in (Path.home() / ".local/bin/agent", Path.home() / ".local/bin/cursor-agent"):
+        if c.is_file():
+            return [str(c)]
     return None
+
+
+def cursor_editor_installed() -> bool:
+    """Cursor 편집기(IDE)만 깔려 있는지 확인용. 편집기의 'cursor' 명령은 CLI(agent)가 아니다."""
+    import os
+    from pathlib import Path
+    la = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData/Local"))
+    return any(p.exists() for p in (la / "Programs/cursor/Cursor.exe", la / "Programs/Cursor/Cursor.exe", Path("/Applications/Cursor.app")))
+
+
+def cursor_missing_message() -> str:
+    import sys
+    cmd = CURSOR_INSTALL_WIN if sys.platform == "win32" else CURSOR_INSTALL_UNIX
+    head = ("Cursor 편집기는 깔려 있지만, 이 앱이 쓰는 Cursor CLI(명령 이름 'agent')는 따로 설치해야 합니다."
+            if cursor_editor_installed() else "Cursor CLI(명령 이름 'agent')를 찾지 못했습니다.")
+    return (f"{head} {'PowerShell' if sys.platform == 'win32' else '터미널'}을 열고 ① {cmd}  ② agent login 을 차례로 실행한 뒤, "
+            "이 앱에서 다시 '연결 확인'을 누르세요.")
 
 
 def _cursor(model: str, key: str, system: str, user: str, timeout: int) -> tuple[str, dict]:
@@ -185,14 +223,14 @@ def _cursor(model: str, key: str, system: str, user: str, timeout: int) -> tuple
     from pathlib import Path
     exe = find_cursor_cli()
     if not exe:
-        raise ProviderError("Cursor CLI(cursor-agent)를 찾지 못했습니다. https://cursor.com/cli 안내대로 설치한 뒤 다시 시도하세요.")
+        raise ProviderError(cursor_missing_message())
     with tempfile.TemporaryDirectory(prefix="aio-cursor-") as tmp:
         (Path(tmp) / "prompt.md").write_text(f"# 지시\n{system}\n\n# 입력\n{user}\n", encoding="utf-8")
-        cmd = [exe, "-p", "Read ./prompt.md in this folder and do exactly what it says. Do not create or edit any files. "
+        cmd = [*exe, "-p", "Read ./prompt.md in this folder and do exactly what it says. Do not create or edit any files. "
                           "Reply with only the answer it asks for.", "--output-format", "json", "--trust"]
         if model:
             cmd += ["--model", model]
-        env = {**os.environ, **({"CURSOR_API_KEY": key} if key else {})}
+        env = {**os.environ, **({"CURSOR_API_KEY": key} if key else {}), "CURSOR_INVOKED_AS": "agent"}
         try:
             p = subprocess.run(cmd, cwd=tmp, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=timeout,
@@ -204,12 +242,19 @@ def _cursor(model: str, key: str, system: str, user: str, timeout: int) -> tuple
         d = json.loads(out[out.find("{"):])
         result = d.get("result", "")
         if p.returncode or d.get("is_error"):
-            raise ProviderError(f"Cursor 오류 (exit {p.returncode}): {str(result or p.stderr)[-400:]}")
+            raise ProviderError(_cursor_err(p.returncode, str(result or p.stderr)))
     except (json.JSONDecodeError, ValueError):
         if p.returncode:
-            raise ProviderError(f"Cursor 오류 (exit {p.returncode}): {(p.stderr or out)[-400:]}") from None
+            raise ProviderError(_cursor_err(p.returncode, p.stderr or out)) from None
         result = out
     return result, {"in": len(system) + len(user), "out": len(result)}
+
+
+def _cursor_err(code: int, msg: str) -> str:
+    if re.search(r"log ?in|authenticat|unauthori|not signed|api key", msg, re.I):
+        return ("Cursor CLI에 로그인돼 있지 않습니다. PowerShell에서 'agent login'을 실행해 로그인하거나, "
+                f"Cursor 대시보드에서 만든 API 키를 앱의 Cursor 키 칸에 넣으세요. ({msg.strip()[-200:]})")
+    return f"Cursor 오류 (exit {code}): {msg.strip()[-400:]}"
 
 
 def _chat(provider: str, model: str, key: str, system: str, user: str,

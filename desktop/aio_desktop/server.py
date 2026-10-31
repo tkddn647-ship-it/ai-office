@@ -316,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "model": "mock", "models": ["mock"], "changed": []})
                 if prov == "cursor":   # 모델 목록 대신 짧은 질문 하나로 확인. 모델은 비우면 Cursor 기본 모델
                     if not pv.find_cursor_cli():
-                        return self._send(400, {"error": "Cursor CLI(cursor-agent)가 이 PC에 없습니다. https://cursor.com/cli 에서 설치하세요."})
+                        return self._send(400, {"error": pv.cursor_missing_message(), "install": pv.CURSOR_INSTALL_WIN})
                     pv.chat("cursor", "", settings.get_keys().get("cursor", ""), "Reply with JSON only.", 'Return {"ok": true}.', timeout=120)
                     return self._send(200, {"ok": True, "model": "(Cursor 기본 모델)", "models": [], "changed": []})
                 key = settings.get_keys().get(prov, "")

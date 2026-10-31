@@ -679,7 +679,7 @@ const WIZ={step:0,prov:"gemini"};
 const PINFO={gemini:{name:"Google Gemini",url:"https://aistudio.google.com/apikey",note:"무료 등급이 있어 부담 없이 시작하기 좋습니다. 단, 무료 등급은 Google이 입력 내용을 서비스 개선에 쓰고 사람이 검토할 수 있습니다(약관 확인 필요). 개인정보가 든 자소서는 유료 등급을 권합니다."},
   openai:{name:"OpenAI (ChatGPT)",url:"https://platform.openai.com/api-keys",note:"ChatGPT 구독과 API는 별도 결제입니다. API 사용량만큼 청구됩니다."},
   anthropic:{name:"Anthropic (Claude)",url:"https://console.anthropic.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다. 긴 글쓰기에 강한 편입니다."},
-  cursor:{name:"Cursor",url:"https://cursor.com/cli",note:"이 PC에 Cursor CLI(cursor-agent)가 설치돼 있어야 합니다 (링크의 설치 안내). CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor 대시보드에서 만든 API 키를 넣으세요. 사용량은 Cursor 요금제에서 차감됩니다(요금제마다 다름). 사진·PDF 읽기는 Cursor로 안 되므로 그 역할만 다른 AI가 필요합니다."}};
+  cursor:{name:"Cursor",url:"https://cursor.com/docs/cli/installation",note:"Cursor CLI(명령 이름 agent)를 씁니다. CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor 대시보드에서 만든 API 키를 넣으세요. 사용량은 Cursor 요금제에서 차감됩니다(요금제마다 다름). 사진·PDF 읽기는 Cursor로 안 되므로 그 역할만 다른 AI가 필요합니다."}};
 function wizOpen(){ WIZ.step=0; document.getElementById("wiz").style.display="flex"; wizDraw(); }
 function wizClose(done){ document.getElementById("wiz").style.display="none"; if(done){ UI.onboarded=true; RESTORED=true; uiSave(); } refreshChecklist(); }
 function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
@@ -689,6 +689,10 @@ function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
     const pick=el("div",{className:"pick"});
     Object.entries(PINFO).forEach(([k,v])=>pick.append(el("button",{className:k===WIZ.prov?"on":"",innerHTML:`<b>${v.name}</b>`+(KEYS_SET[k]?'<br><span class="keyset">● 키 저장됨</span>':""),onclick:()=>{WIZ.prov=k;wizDraw()}})));
     const v=PINFO[WIZ.prov]; c.append(pick,el("div",{className:"hint",textContent:v.note}));
+    if(WIZ.prov==="cursor"){ const cmd1="irm 'https://cursor.com/install?win32=true' | iex", cmd2="agent login";
+      const line=(t)=>el("div",{className:"row",style:"margin-top:4px"},[el("code",{textContent:t,style:"flex:1;background:#f2f4f8;padding:6px 8px;border-radius:6px;font-size:12px;overflow:auto"}),
+        el("button",{className:"ghost",textContent:"복사",style:"flex:none",onclick:()=>navigator.clipboard.writeText(t)})]);
+      c.append(el("div",{className:"hint",style:"margin-top:8px",innerHTML:"<b>Cursor 편집기와 Cursor CLI는 다른 프로그램입니다.</b> 편집기만 깔려 있으면 CLI를 따로 설치해야 합니다. 시작 메뉴에서 <b>PowerShell</b>을 열고 아래 두 줄을 차례로 붙여 넣으세요 (두 번째 줄은 브라우저에서 Cursor 로그인)."}),line(cmd1),line(cmd2)); }
     const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":(WIZ.prov==="cursor"?"Cursor API 키 (CLI에 로그인돼 있으면 비워도 됨)":"API 키 붙여 넣기")}); const out=el("div",{className:"hint"});
     c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">${WIZ.prov==="cursor"?"CLI 설치 안내":"여기서 발급"}</a>`}),key,out);
     c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"키 없이 둘러보기 (가짜 AI)",onclick:async()=>{await wizApply("mock","");WIZ.step=1;wizDraw()}}),

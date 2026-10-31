@@ -220,6 +220,36 @@ class ModelTest(unittest.TestCase):
         self.assertIn("API key not valid", str(c.exception))
 
 
+class CursorFindTest(unittest.TestCase):
+    def test_windows_layout_prefers_newest_node(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "cursor-agent"
+            for v in ("2025.09.3-aaa", "2026.10.28-bbb", "2026.2.1-ccc"):
+                (root / "versions" / v).mkdir(parents=True)
+                (root / "versions" / v / "node.exe").write_text("x")
+                (root / "versions" / v / "index.js").write_text("x")
+            (root / "agent.cmd").write_text("x")
+            old_p, old_e = sys.platform, os.environ.get("LOCALAPPDATA")
+            sys.platform, os.environ["LOCALAPPDATA"] = "win32", d
+            try:
+                cmd = providers.find_cursor_cli()
+                self.assertTrue(cmd[0].endswith("node.exe") and "2026.10.28-bbb" in cmd[0] and cmd[1].endswith("index.js"))
+                import shutil
+                shutil.rmtree(root / "versions")
+                self.assertTrue(providers.find_cursor_cli()[0].endswith("agent.cmd"))   # node가 없으면 agent.cmd
+                (root / "agent.cmd").unlink()
+                (Path(d) / "Programs" / "cursor").mkdir(parents=True)
+                (Path(d) / "Programs" / "cursor" / "Cursor.exe").write_text("x")
+                self.assertIn("편집기는 깔려 있지만", providers.cursor_missing_message())
+                self.assertIn("agent login", providers.cursor_missing_message())
+            finally:
+                sys.platform = old_p
+                if old_e is None:
+                    os.environ.pop("LOCALAPPDATA", None)
+                else:
+                    os.environ["LOCALAPPDATA"] = old_e
+
+
 @unittest.skipIf(sys.platform == "win32", "가짜 CLI를 셸 스크립트로 만듦")
 class CursorTest(unittest.TestCase):
     def test_long_prompt_goes_through_file(self):

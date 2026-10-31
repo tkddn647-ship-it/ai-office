@@ -5,6 +5,7 @@ name: Desktop build (Windows)
 
 on:
   push:
+    branches: ["**"]
     paths: ["desktop/**", ".github/workflows/desktop-build.yml"]
     tags: ["desktop-v*"]
   workflow_dispatch:

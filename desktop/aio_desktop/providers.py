@@ -5,20 +5,107 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
 
+# default_model은 키를 넣기 전 임시값이다. 키 확인 때 회사의 모델 목록에서 실제로 되는 모델로 바꾼다.
 PROVIDERS = {
     "openai": {"label": "OpenAI", "default_model": "gpt-4o-mini"},
     "anthropic": {"label": "Anthropic (Claude)", "default_model": "claude-sonnet-4-5"},
-    "gemini": {"label": "Google Gemini", "default_model": "gemini-2.5-flash"},
+    "gemini": {"label": "Google Gemini", "default_model": "gemini-flash-latest"},
+    "cursor": {"label": "Cursor (Cursor CLI 필요)", "default_model": ""},
     "mock": {"label": "테스트용 가짜 AI (키 불필요)", "default_model": "mock"},
 }
 
 
 class ProviderError(RuntimeError):
     pass
+
+
+def _get(url: str, headers: dict, timeout: int = 30) -> dict:
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise ProviderError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from None
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise ProviderError(f"연결 실패: {e}") from None
+
+
+# ---------- 모델 고르기 ----------
+# 회사들이 모델을 자주 바꾸고 옛 모델을 닫는다. 이름을 고정하지 않고, 키로 '지금 쓸 수 있는 모델 목록'을 받아 고른다.
+_SKIP = re.compile(r"(embed|tts|audio|realtime|transcribe|image|vision-only|search|moderation|whisper|dall|davinci|babbage|"
+                   r"computer-use|live|aqa|learnlm|gemma|codex|instruct|robotics|veo|imagen|native|-exp|experimental)", re.I)
+
+
+def list_models(provider: str, key: str) -> list[str]:
+    """키로 그 회사가 지금 허용하는 텍스트 생성 모델 이름 목록. 키가 틀리면 여기서 401·403이 난다(비용 없음)."""
+    if provider == "openai":
+        d = _get("https://api.openai.com/v1/models", {"authorization": f"Bearer {key}"})
+        return [m["id"] for m in d.get("data", []) if re.match(r"(gpt|o\d|chatgpt)", m.get("id", ""))]
+    if provider == "anthropic":
+        d = _get("https://api.anthropic.com/v1/models?limit=100", {"x-api-key": key, "anthropic-version": "2023-06-01"})
+        return [m["id"] for m in d.get("data", [])]
+    if provider == "gemini":
+        out, tok = [], ""
+        for _ in range(5):
+            d = _get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" + (f"&pageToken={tok}" if tok else ""),
+                     {"x-goog-api-key": key})
+            out += [m["name"].removeprefix("models/") for m in d.get("models", [])
+                    if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+            tok = d.get("nextPageToken") or ""
+            if not tok:
+                break
+        return out
+    return []
+
+
+def _ver(name: str) -> tuple:
+    name = re.sub(r"-?\d{4}-?\d{2}-?\d{2}$|-\d{8}", "", name)     # 날짜 붙은 고정판은 버전으로 치지 않음
+    return tuple(float(x) if "." in x else int(x) for x in re.findall(r"\d+(?:\.\d+)?", name)[:3])
+
+
+def rank_models(provider: str, ids: list[str]) -> list[str]:
+    """쓸 만한 순서로 정렬: 일반 대화형, 미리보기 아님, 최신 버전. 회사별로 비용 대비 무난한 급(flash·mini·sonnet)을 앞에."""
+    cand = [i for i in ids if not _SKIP.search(i)]
+    pref = {"gemini": r"flash(?!-lite)", "openai": r"mini", "anthropic": r"sonnet"}.get(provider, "")
+
+    def key(i):
+        dated = bool(re.search(r"\d{4}-?\d{2}-?\d{2}$|-\d{8}", i))
+        return (bool(re.search(pref, i)) if pref else False, "preview" not in i and "latest" not in i, _ver(i), not dated, -len(i))
+    return sorted(cand, key=key, reverse=True)
+
+
+def suggested_model(err: str) -> str:
+    """'models/X is no longer available … use models/Y' 같은 안내에서 Y를 꺼낸다."""
+    m = re.search(r"use (?:models/)?([A-Za-z0-9._-]+)", err)
+    return m.group(1).rstrip(".") if m else ""
+
+
+def is_model_error(err: str) -> bool:
+    return bool(re.search(r"HTTP 404|not[_ ]found|no longer available|does not exist|model_not_found|invalid model|unknown model", err, re.I))
+
+
+def find_working_model(provider: str, key: str, current: str = "", tried_err: str = "") -> tuple[str, list[str]]:
+    """지금 키로 실제 답이 오는 모델을 찾는다. 반환: (모델, 목록). 후보를 작은 질문으로 하나씩 시험(최대 4개)."""
+    ids = list_models(provider, key)
+    order = []
+    for m in [suggested_model(tried_err), current] + rank_models(provider, ids):
+        if m and m not in order and (not ids or m in ids or m == suggested_model(tried_err)):
+            order.append(m)
+    last = ""
+    for m in order[:4]:
+        try:
+            chat(provider, m, key, "Reply with JSON only.", 'Return {"ok": true}.', timeout=40, _no_fix=True)
+            return m, ids
+        except ProviderError as e:
+            last = str(e)
+            if not is_model_error(last) and "429" not in last:
+                raise
+    raise ProviderError(f"쓸 수 있는 모델을 찾지 못했습니다. 마지막 오류: {last[:200]}")
 
 
 def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
@@ -48,8 +135,82 @@ def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
+MODEL_FIX: dict[tuple[str, str], str] = {}   # (회사, 안 되는 모델) → 대신 쓰는 모델. 설정 저장은 서버가 한다
+
+
 def chat(provider: str, model: str, key: str, system: str, user: str,
-         json_mode: bool = True, timeout: int = 180, mock=None, files: list[dict] | None = None) -> tuple[str, dict]:
+         json_mode: bool = True, timeout: int = 180, mock=None, files: list[dict] | None = None, _no_fix: bool = False) -> tuple[str, dict]:
+    """모델이 없어졌다는 오류가 나면 지금 쓸 수 있는 모델을 찾아 한 번 다시 묻는다 (바꾼 모델은 MODEL_FIX에 기록)."""
+    model = MODEL_FIX.get((provider, model), model)
+    try:
+        return _chat(provider, model, key, system, user, json_mode, timeout, mock, files)
+    except ProviderError as e:
+        if _no_fix or provider in ("mock", "cursor") or not key or not is_model_error(str(e)):
+            raise
+        new, _ = find_working_model(provider, key, "", str(e))
+        MODEL_FIX[(provider, model)] = new
+        text, usage = _chat(provider, new, key, system, user, json_mode, timeout, mock, files)
+        usage["model_switched"] = f"{model} → {new}"
+        return text, usage
+
+
+def find_cursor_cli() -> str | None:
+    """Cursor CLI(cursor-agent) 위치. 설치: https://cursor.com/cli"""
+    import os
+    import shutil
+    from pathlib import Path
+    for n in ("cursor-agent", "cursor-agent.cmd", "cursor-agent.exe", "agent"):
+        p = shutil.which(n)
+        if p and ("agent" in Path(p).name):
+            return p
+    home = Path.home()
+    for c in (home / ".local/bin/cursor-agent", home / ".cursor/bin/cursor-agent",
+              Path(os.environ.get("LOCALAPPDATA", "")) / "cursor-agent/cursor-agent.cmd",
+              Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/cursor-agent/cursor-agent.exe"):
+        if str(c) and c.is_file():
+            return str(c)
+    return None
+
+
+def _cursor(model: str, key: str, system: str, user: str, timeout: int) -> tuple[str, dict]:
+    """Cursor CLI를 화면 없이(print 모드) 부른다. for_office의 심사 패널과 같은 방식.
+    - 프롬프트는 빈 임시 폴더의 prompt.md에 쓰고 '읽고 따르라'고만 넘긴다 (Windows 명령줄 길이 한계 때문).
+    - 임시 폴더 밖 파일은 건드릴 수 없고, --force를 주지 않아 셸 명령은 승인 없이 실행되지 않는다."""
+    import os
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    exe = find_cursor_cli()
+    if not exe:
+        raise ProviderError("Cursor CLI(cursor-agent)를 찾지 못했습니다. https://cursor.com/cli 안내대로 설치한 뒤 다시 시도하세요.")
+    with tempfile.TemporaryDirectory(prefix="aio-cursor-") as tmp:
+        (Path(tmp) / "prompt.md").write_text(f"# 지시\n{system}\n\n# 입력\n{user}\n", encoding="utf-8")
+        cmd = [exe, "-p", "Read ./prompt.md in this folder and do exactly what it says. Do not create or edit any files. "
+                          "Reply with only the answer it asks for.", "--output-format", "json", "--trust"]
+        if model:
+            cmd += ["--model", model]
+        env = {**os.environ, **({"CURSOR_API_KEY": key} if key else {})}
+        try:
+            p = subprocess.run(cmd, cwd=tmp, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=timeout,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            raise ProviderError(f"Cursor가 {timeout}초 안에 답하지 않았습니다") from None
+    out = (p.stdout or "").strip()
+    try:
+        d = json.loads(out[out.find("{"):])
+        result = d.get("result", "")
+        if p.returncode or d.get("is_error"):
+            raise ProviderError(f"Cursor 오류 (exit {p.returncode}): {str(result or p.stderr)[-400:]}")
+    except (json.JSONDecodeError, ValueError):
+        if p.returncode:
+            raise ProviderError(f"Cursor 오류 (exit {p.returncode}): {(p.stderr or out)[-400:]}") from None
+        result = out
+    return result, {"in": len(system) + len(user), "out": len(result)}
+
+
+def _chat(provider: str, model: str, key: str, system: str, user: str,
+          json_mode: bool = True, timeout: int = 180, mock=None, files: list[dict] | None = None) -> tuple[str, dict]:
     """한 번 묻고 답을 받는다. 반환: (텍스트, 사용량 dict).
     files: [{"name", "mime", "data"(base64)}] — 사진(png·jpg·webp·gif)과 PDF. 세 회사 모두 사진·PDF를 직접 읽는다."""
     files = files or []
@@ -59,6 +220,10 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
     model = model or PROVIDERS.get(provider, {}).get("default_model", "")
     if provider == "mock":
         return (mock or demo_mock)(system, user), {"in": len(user), "out": 0}
+    if provider == "cursor":
+        if files:
+            raise ProviderError("Cursor로는 이 앱에서 사진·PDF를 읽을 수 없습니다. '사진·PDF 읽기' 역할은 Gemini·OpenAI·Claude 중 하나로 바꿔 주세요.")
+        return _cursor(model, key, system, user, max(timeout, 300))
     if not key:
         raise ProviderError(f"{PROVIDERS.get(provider, {}).get('label', provider)} API 키가 비어 있습니다. 설정에서 넣어 주세요.")
 

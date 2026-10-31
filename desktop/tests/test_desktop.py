@@ -172,6 +172,77 @@ class ServerTest(unittest.TestCase):
             httpd.shutdown()
 
 
+class ModelTest(unittest.TestCase):
+    """회사가 옛 모델을 닫았을 때: 목록에서 되는 모델을 찾아 바꾼다 (실제 Gemini 404 문구로 시험)."""
+    GONE = ('HTTP 404: { "error": { "code": 404, "message": "This model models/gemini-2.5-flash is no longer available to new users. '
+            'Please update your code to use models/gemini-3.8-flash for the latest features and improvements.", "status": "NOT_FOUND" } }')
+
+    def setUp(self):
+        self.orig = (providers._get, providers._post)
+        self.posts = []
+
+        def fake_get(url, headers, timeout=30):
+            return {"models": [{"name": f"models/{n}", "supportedGenerationMethods": ["generateContent"]} for n in
+                               ("gemini-2.5-flash", "gemini-3.8-flash", "gemini-3.8-pro", "gemini-embedding-001")]}
+
+        def fake_post(url, headers, body, timeout):
+            self.posts.append(url)
+            if "gemini-2.5-flash" in url:
+                raise providers.ProviderError(self.GONE)
+            return {"candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]}
+        providers._get, providers._post = fake_get, fake_post
+        providers.MODEL_FIX.clear()
+
+    def tearDown(self):
+        providers._get, providers._post = self.orig
+        providers.MODEL_FIX.clear()
+
+    def test_find_working_model(self):
+        m, ids = providers.find_working_model("gemini", "k", "gemini-2.5-flash")
+        self.assertEqual(m, "gemini-3.8-flash")
+        self.assertNotIn("gemini-embedding-001", providers.rank_models("gemini", ids))
+
+    def test_chat_switches_once_and_remembers(self):
+        text, usage = providers.chat("gemini", "gemini-2.5-flash", "k", "s", "u")
+        self.assertEqual(text, '{"ok": true}')
+        self.assertEqual(usage["model_switched"], "gemini-2.5-flash → gemini-3.8-flash")
+        n = len(self.posts)
+        providers.chat("gemini", "gemini-2.5-flash", "k", "s", "u")          # 두 번째부터는 바로 새 모델
+        self.assertEqual(len(self.posts), n + 1)
+        self.assertIn("gemini-3.8-flash", self.posts[-1])
+
+    def test_wrong_key_is_not_model_error(self):
+        def deny(url, headers, timeout=30):
+            raise providers.ProviderError("HTTP 400: API key not valid")
+        providers._get = deny
+        with self.assertRaises(providers.ProviderError) as c:
+            providers.find_working_model("gemini", "bad")
+        self.assertIn("API key not valid", str(c.exception))
+
+
+@unittest.skipIf(sys.platform == "win32", "가짜 CLI를 셸 스크립트로 만듦")
+class CursorTest(unittest.TestCase):
+    def test_long_prompt_goes_through_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe = Path(d) / "cursor-agent"
+            exe.write_text("#!" + sys.executable + "\nimport json,os,sys\np=open('prompt.md',encoding='utf-8').read()\n"
+                           "print(json.dumps({'type':'result','is_error':False,'result':json.dumps({'n':len(p),'cwd_files':os.listdir('.'),"
+                           "'key':os.environ.get('CURSOR_API_KEY','')})}))\n", encoding="utf-8")
+            exe.chmod(0o755)
+            old = os.environ["PATH"]
+            os.environ["PATH"] = d + os.pathsep + old
+            try:
+                t, _ = providers.chat("cursor", "", "ck", "규칙", "가" * 100000)
+                r = json.loads(t)
+                self.assertGreater(r["n"], 100000)               # 긴 프롬프트도 파일로 전달
+                self.assertEqual(r["cwd_files"], ["prompt.md"])  # 빈 임시 폴더에서만 실행
+                self.assertEqual(r["key"], "ck")
+                with self.assertRaises(providers.ProviderError):
+                    providers.chat("cursor", "", "", "s", "u", files=[{"name": "a.png", "mime": "image/png", "data": ""}])
+            finally:
+                os.environ["PATH"] = old
+
+
 class LifetimeTest(unittest.TestCase):
     def test_close_waits_for_running_job(self):
         from aio_desktop import window

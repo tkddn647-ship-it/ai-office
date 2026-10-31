@@ -285,13 +285,32 @@ class Handler(BaseHTTPRequestHandler):
                 p.rename(trash / f"{datetime.now():%Y%m%d-%H%M%S}-{name}")
                 return self._send(200, {"ok": True})
             if path == "/api/keytest":
+                # 키 확인 + 지금 쓸 수 있는 모델 찾기. 이 회사를 쓰는 역할 중 안 되는 모델은 찾은 모델로 바꾼다.
                 from . import providers as pv
-                prov, model = b.get("provider", ""), b.get("model", "")
+                prov = b.get("provider", "")
                 if prov not in pv.PROVIDERS:
                     return self._send(400, {"error": "모르는 AI"})
-                txt, _ = pv.chat(prov, model, settings.get_keys().get(prov, ""), "Reply with JSON only.",
-                                 'Return {"ok": true}.', mock=(lambda s, u: '{"ok": true}') if prov == "mock" else None, timeout=40)
-                return self._send(200, {"ok": True, "reply": txt[:80]})
+                if prov == "mock":
+                    return self._send(200, {"ok": True, "model": "mock", "models": ["mock"], "changed": []})
+                if prov == "cursor":   # 모델 목록 대신 짧은 질문 하나로 확인. 모델은 비우면 Cursor 기본 모델
+                    if not pv.find_cursor_cli():
+                        return self._send(400, {"error": "Cursor CLI(cursor-agent)가 이 PC에 없습니다. https://cursor.com/cli 에서 설치하세요."})
+                    pv.chat("cursor", "", settings.get_keys().get("cursor", ""), "Reply with JSON only.", 'Return {"ok": true}.', timeout=120)
+                    return self._send(200, {"ok": True, "model": "(Cursor 기본 모델)", "models": [], "changed": []})
+                key = settings.get_keys().get(prov, "")
+                if not key:
+                    return self._send(400, {"error": "키가 비어 있습니다"})
+                cfg = settings.load_config()
+                cur = next((v.get("model", "") for v in cfg["roles"].values() if v.get("provider") == prov), "")
+                model, ids = pv.find_working_model(prov, key, cur)
+                ranked = pv.rank_models(prov, ids)
+                changed = []
+                for r, v in cfg["roles"].items():
+                    if v.get("provider") == prov and (not v.get("model") or (ids and v["model"] not in ids) or v["model"] == cur and cur != model):
+                        changed.append(f"{r}: {v.get('model') or '(없음)'} → {model}")
+                        v["model"] = model
+                settings.save_config(cfg)
+                return self._send(200, {"ok": True, "model": model, "models": ranked[:40], "changed": changed})
             if path == "/api/exp/organize":
                 if not (b.get("notes") or "").strip():
                     return self._send(400, {"error": "메모를 적어 주세요"})

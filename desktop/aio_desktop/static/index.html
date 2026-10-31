@@ -68,7 +68,7 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
 #wiz{position:fixed;inset:0;background:rgba(15,20,30,.45);display:none;align-items:center;justify-content:center;z-index:20}
 #wiz .card{background:#fff;border-radius:14px;width:min(640px,92vw);max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
 #wiz h3{margin:0 0 4px;font-size:18px} .wsteps{font-size:12px;color:var(--sub);margin-bottom:12px}
-.pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.pick{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:10px 0}
 .pick button{background:#fff;color:var(--ink);border:1px solid var(--line);text-align:left;white-space:normal;padding:10px;line-height:1.4}
 .pick button.on{border-color:var(--accent);background:#eef3ff}
 .wbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
@@ -290,7 +290,11 @@ async function load(){
   for(const [k,v] of Object.entries(PROV)){ if(k==="mock")continue;
     const inp=el("input",{id:"k_"+k,type:"password",placeholder:j.keys_set[k]?"저장됨 · 바꾸려면 새로 입력":"키 입력"});
     const del=el("button",{className:"ghost",textContent:"삭제",style:"flex:none",onclick:async()=>{await api("/api/config",{keys:{[k]:"__delete__"}});load()}});
-    keys.append(el("label",{innerHTML:v.label+(j.keys_set[k]?' <span class="keyset">● 저장됨</span>':'')}),el("div",{className:"row"},[inp,del]));
+    const chk=el("button",{className:"ghost",textContent:"연결 확인",style:"flex:none",onclick:async()=>{ chk.disabled=true; chk.textContent="확인 중…";
+      try{ await save(); const r=await api("/api/keytest",{provider:k}); await load();
+        render({role:"system",kind:"info",time:"",text:`${v.label} 연결됨. 쓸 모델: ${r.model}`+(r.changed.length?"\n바꾼 설정: "+r.changed.join(", "):"")+"\n쓸 수 있는 모델: "+r.models.slice(0,12).join(", ")}); }
+      catch(e){ alertBox(v.label+" 연결 실패: "+e.message) } finally{ chk.disabled=false; chk.textContent="연결 확인"; } }});
+    keys.append(el("label",{innerHTML:v.label+(j.keys_set[k]?' <span class="keyset">● 저장됨</span>':'')}),el("div",{className:"row"},[inp,chk,del]));
   }
 }
 async function save(){
@@ -650,7 +654,8 @@ async function refreshChecklist(){
 const WIZ={step:0,prov:"gemini"};
 const PINFO={gemini:{name:"Google Gemini",url:"https://aistudio.google.com/apikey",note:"무료 등급이 있어 부담 없이 시작하기 좋습니다. 단, 무료 등급은 Google이 입력 내용을 서비스 개선에 쓰고 사람이 검토할 수 있습니다(약관 확인 필요). 개인정보가 든 자소서는 유료 등급을 권합니다."},
   openai:{name:"OpenAI (ChatGPT)",url:"https://platform.openai.com/api-keys",note:"ChatGPT 구독과 API는 별도 결제입니다. API 사용량만큼 청구됩니다."},
-  anthropic:{name:"Anthropic (Claude)",url:"https://console.anthropic.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다. 긴 글쓰기에 강한 편입니다."}};
+  anthropic:{name:"Anthropic (Claude)",url:"https://console.anthropic.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다. 긴 글쓰기에 강한 편입니다."},
+  cursor:{name:"Cursor",url:"https://cursor.com/cli",note:"이 PC에 Cursor CLI(cursor-agent)가 설치돼 있어야 합니다 (링크의 설치 안내). CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor 대시보드에서 만든 API 키를 넣으세요. 사용량은 Cursor 요금제에서 차감됩니다(요금제마다 다름). 사진·PDF 읽기는 Cursor로 안 되므로 그 역할만 다른 AI가 필요합니다."}};
 function wizOpen(){ WIZ.step=0; document.getElementById("wiz").style.display="flex"; wizDraw(); }
 function wizClose(done){ document.getElementById("wiz").style.display="none"; if(done){ UI.onboarded=true; RESTORED=true; uiSave(); } refreshChecklist(); }
 function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
@@ -660,11 +665,14 @@ function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
     const pick=el("div",{className:"pick"});
     Object.entries(PINFO).forEach(([k,v])=>pick.append(el("button",{className:k===WIZ.prov?"on":"",innerHTML:`<b>${v.name}</b>`+(KEYS_SET[k]?'<br><span class="keyset">● 키 저장됨</span>':""),onclick:()=>{WIZ.prov=k;wizDraw()}})));
     const v=PINFO[WIZ.prov]; c.append(pick,el("div",{className:"hint",textContent:v.note}));
-    const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":"API 키 붙여 넣기"}); const out=el("div",{className:"hint"});
-    c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">여기서 발급</a>`}),key,out);
+    const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":(WIZ.prov==="cursor"?"Cursor API 키 (CLI에 로그인돼 있으면 비워도 됨)":"API 키 붙여 넣기")}); const out=el("div",{className:"hint"});
+    c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">${WIZ.prov==="cursor"?"CLI 설치 안내":"여기서 발급"}</a>`}),key,out);
     c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"키 없이 둘러보기 (가짜 AI)",onclick:async()=>{await wizApply("mock","");WIZ.step=1;wizDraw()}}),
       el("button",{textContent:"키 확인하고 다음",onclick:async()=>{ out.textContent="확인 중…"; try{ await wizApply(WIZ.prov,key.value.trim());
-        const r=await api("/api/keytest",{provider:WIZ.prov,model:PROV[WIZ.prov].default_model}); out.textContent="연결됐습니다."; WIZ.step=1; wizDraw(); }
+        out.textContent="키 확인하고 지금 쓸 수 있는 모델을 찾는 중…";
+        const r=await api("/api/keytest",{provider:WIZ.prov}); await load(); out.textContent="연결됐습니다 · 모델: "+r.model;
+        render({role:"system",kind:"info",time:"",text:`${PINFO[WIZ.prov].name} 연결됨. 쓸 모델: ${r.model}`+(r.changed.length?"\n바꾼 설정: "+r.changed.join(", "):"")});
+        setTimeout(()=>{WIZ.step=1; wizDraw();},700); }
         catch(e){ out.textContent="연결 실패: "+e.message+" · 키를 다시 확인하세요."; } }})]));
   } else if(WIZ.step===1){
     c.append(el("h3",{textContent:"내 경험·활동을 넣어 주세요"}),el("div",{className:"hint",textContent:"자소서는 여기 넣은 경험만 근거로 씁니다. 보고서·발표 자료·포트폴리오 PDF, 상장 사진, 메모 무엇이든 됩니다. AI가 양식으로 정리하면, 빈 곳([확인 필요])을 채워 저장하세요."}));
@@ -676,7 +684,7 @@ function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
     c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"닫기",onclick:()=>wizClose(true)}),
       el("button",{textContent:"공고 넣으러 가기",onclick:()=>{wizClose(true);setMode("jaso");jsub("app");appNew()}})]));
   } }
-async function wizApply(prov,key){ const roles={}; for(const r of Object.keys(ROLES)) roles[r]={provider:prov,model:PROV[prov].default_model};
+async function wizApply(prov,key){ const roles={}; for(const r of Object.keys(ROLES)){ if(prov==="cursor"&&r==="reader") continue; roles[r]={provider:prov,model:PROV[prov].default_model}; }
   await api("/api/config",{roles,keys:key?{[prov]:key}:{}}); await load(); }
 
 addEventListener("pagehide",()=>{ try{ navigator.sendBeacon("/api/bye", new Blob([TOKEN],{type:"text/plain"})); }catch(e){} });

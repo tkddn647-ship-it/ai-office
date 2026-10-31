@@ -57,12 +57,22 @@ def load_config() -> dict:
                     cfg["roles"][r].update(v)
         except (OSError, json.JSONDecodeError):
             pass
-    return cfg
+    return _apply_model_fixes(cfg)
 
 
 def data_dir(cfg: dict) -> str:
     from .library import default_dir
     return cfg.get("data_dir") or default_dir()
+
+
+def _apply_model_fixes(cfg: dict) -> dict:
+    """실행 중에 '모델이 없어짐' 오류로 자동으로 바꾼 모델을 설정에도 반영한다."""
+    from .providers import MODEL_FIX
+    for v in cfg.get("roles", {}).values():
+        new = MODEL_FIX.get((v.get("provider"), v.get("model")))
+        if new:
+            v["model"] = new
+    return cfg
 
 
 def save_config(cfg: dict):

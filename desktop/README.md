@@ -142,6 +142,10 @@ for_office 저장소 폴더를 자료 폴더로 고르면 기존 `experiences/` 
 - 릴리스에 `AIOfficeDesktop.exe.sha256`을 같이 올립니다. 받은 뒤 PowerShell에서 `Get-FileHash AIOfficeDesktop.exe`로 값이 같은지 확인하세요.
 - 코드 서명은 아직 없습니다. SmartScreen 경고가 뜨고, 백신이 오탐할 수 있습니다.
 
+## AI 고르기 · 모델
+- **OpenAI · Anthropic(Claude) · Google Gemini**: API 키를 넣고 **연결 확인**을 누르면 그 회사의 모델 목록을 받아 지금 쓸 수 있는 모델을 골라 줍니다 (Gemini는 flash, OpenAI는 mini, Claude는 sonnet 급 최신판). 회사가 옛 모델을 닫아 "모델이 없다"는 오류가 나면, 실행 중에도 목록에서 되는 모델로 한 번 바꿔 다시 묻고 설정에 반영합니다.
+- **Cursor**: 이 PC에 [Cursor CLI](https://cursor.com/cli)(`cursor-agent`)가 설치돼 있어야 합니다. CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor API 키를 넣습니다. for_office 심사 패널과 같은 방식으로, 빈 임시 폴더에서 화면 없이 실행하고 파일 수정·셸 명령 자동 실행은 허용하지 않습니다. 사용량은 Cursor 요금제에서 차감됩니다. **사진·PDF 읽기는 Cursor로 안 되므로** 그 역할만 다른 AI를 고르세요.
+
 ## API 키와 비용
 - 키는 Windows 자격 증명 관리자에 저장합니다. 저장이 안 되는 환경에서는 `%APPDATA%\AIOfficeDesktop\keys.json`에 저장하고 화면에 그 위치를 표시합니다.
 - 키는 각 회사 API로만 보내고, 화면에 다시 표시하지 않습니다.

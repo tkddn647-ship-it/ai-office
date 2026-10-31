@@ -41,6 +41,10 @@ DEFAULT = {
     "sync": {"kind": "github", "value": "", "branch": "main", "auto": False},
     # 다음에 켤 때 그대로 열리게: 마지막 탭, 마지막 지원서, 마지막 경험
     "ui": {"mode": "jaso", "sub": "exp", "app": "", "exp": "", "onboarded": False},
+    # 회사별로 내가 고른 모델. 역할은 회사만 고르고 모델은 여기 것을 쓴다 (역할마다 다르게 하려면 role의 override)
+    "models": {"openai": "", "anthropic": "", "gemini": "", "cursor": ""},
+    "model_lists": {},          # 회사별 마지막으로 받은 모델 목록 {회사: {"at": 시각, "ids": [...]}}
+    "auto_model_fix": True,     # 고른 모델이 없어졌을 때 되는 모델로 자동으로 바꿀지
     "data_dir": "",   # 자소서 자료 폴더. 비우면 문서\AIOffice자소서
 }
 
@@ -66,12 +70,18 @@ def data_dir(cfg: dict) -> str:
 
 
 def _apply_model_fixes(cfg: dict) -> dict:
-    """실행 중에 '모델이 없어짐' 오류로 자동으로 바꾼 모델을 설정에도 반영한다."""
-    from .providers import MODEL_FIX
+    """1) 실행 중 '모델이 없어짐'으로 자동으로 바꾼 모델을 반영  2) 역할 모델 = 회사별로 고른 모델 (override가 아니면)."""
+    from . import providers
+    providers.AUTO_FIX = bool(cfg.get("auto_model_fix", True))
+    models = cfg.setdefault("models", {})
+    for prov, m in list(models.items()):
+        if m and (prov, m) in providers.MODEL_FIX:
+            models[prov] = providers.MODEL_FIX[(prov, m)]
     for v in cfg.get("roles", {}).values():
-        new = MODEL_FIX.get((v.get("provider"), v.get("model")))
-        if new:
-            v["model"] = new
+        if v.get("override") and v.get("model"):
+            v["model"] = providers.MODEL_FIX.get((v.get("provider"), v["model"]), v["model"])
+            continue
+        v["model"] = models.get(v.get("provider")) or v.get("model") or providers.PROVIDERS.get(v.get("provider"), {}).get("default_model", "")
     return cfg
 
 

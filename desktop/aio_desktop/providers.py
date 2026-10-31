@@ -135,6 +135,7 @@ def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
+AUTO_FIX = True   # 설정 '모델이 없어지면 자동으로 바꾸기'
 MODEL_FIX: dict[tuple[str, str], str] = {}   # (회사, 안 되는 모델) → 대신 쓰는 모델. 설정 저장은 서버가 한다
 
 
@@ -147,6 +148,8 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
     except ProviderError as e:
         if _no_fix or provider in ("mock", "cursor") or not key or not is_model_error(str(e)):
             raise
+        if not AUTO_FIX:
+            raise ProviderError(f"모델 '{model}'을(를) 쓸 수 없습니다. 왼쪽 'AI 회사·모델'에서 목록 새로고침 후 다른 모델을 골라 주세요. ({str(e)[:200]})") from None
         new, _ = find_working_model(provider, key, "", str(e))
         MODEL_FIX[(provider, model)] = new
         text, usage = _chat(provider, new, key, system, user, json_mode, timeout, mock, files)

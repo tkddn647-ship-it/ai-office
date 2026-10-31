@@ -183,6 +183,23 @@ class Handler(BaseHTTPRequestHandler):
                                         "guides": Guides(lib.root).summary()})
             if path == "/api/exp":
                 return self._send(200, {"id": q.get("id"), "body": _lib().exp_read(q.get("id", ""))})
+            if path == "/api/models":   # 회사 모델 목록 새로고침 (키 필요, 비용 없음)
+                from . import providers as pv
+                prov = q.get("provider", "")
+                key = settings.get_keys().get(prov, "")
+                if prov not in pv.PROVIDERS or prov in ("mock", "cursor"):
+                    return self._send(200, {"models": []})
+                if not key:
+                    return self._send(400, {"error": "먼저 키를 넣고 저장해 주세요"})
+                try:
+                    ranked = pv.rank_models(prov, pv.list_models(prov, key))
+                    allm = pv.list_models(prov, key) if q.get("all") else []
+                except pv.ProviderError as e:
+                    return self._send(502, {"error": str(e)})
+                cfg = settings.load_config()
+                cfg.setdefault("model_lists", {})[prov] = {"at": datetime.now().isoformat(timespec="minutes"), "ids": ranked}
+                settings.save_config(cfg)
+                return self._send(200, {"models": ranked, "all": allm})
             if path == "/api/guides":
                 lib = _lib()
                 gd = lib.root / "guides"
@@ -243,7 +260,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(413, {"error": str(e)})
         if path == "/api/config":
             cfg = settings.load_config()
-            for k in ("workspace", "test_command", "test_auto", "lang", "max_tasks", "max_fix_rounds", "max_calls", "data_dir"):
+            for k in ("workspace", "test_command", "test_auto", "lang", "max_tasks", "max_fix_rounds", "max_calls", "data_dir", "auto_model_fix"):
                 if k in b:
                     cfg[k] = b[k]
             for k in ("security", "sync", "ui"):
@@ -251,7 +268,12 @@ class Handler(BaseHTTPRequestHandler):
                     cfg[k] = {**cfg.get(k, {}), **b[k]}
             for role, v in (b.get("roles") or {}).items():
                 if role in cfg["roles"] and v.get("provider") in PROVIDERS:
-                    cfg["roles"][role] = {"provider": v["provider"], "model": (v.get("model") or "").strip()}
+                    ov = bool(v.get("override"))
+                    cfg["roles"][role] = {"provider": v["provider"], "override": ov,
+                                          "model": (v.get("model") or "").strip() if ov else cfg["roles"][role].get("model", "")}
+            for prov, m in (b.get("models") or {}).items():
+                if prov in PROVIDERS and prov != "mock":
+                    cfg.setdefault("models", {})[prov] = (m or "").strip()
             settings.save_config(cfg)
             for prov, val in (b.get("keys") or {}).items():
                 if val == "__delete__":
@@ -301,14 +323,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not key:
                     return self._send(400, {"error": "키가 비어 있습니다"})
                 cfg = settings.load_config()
-                cur = next((v.get("model", "") for v in cfg["roles"].values() if v.get("provider") == prov), "")
+                cur = (cfg.get("models") or {}).get(prov, "")
                 model, ids = pv.find_working_model(prov, key, cur)
                 ranked = pv.rank_models(prov, ids)
+                cfg.setdefault("model_lists", {})[prov] = {"at": datetime.now().isoformat(timespec="minutes"), "ids": ranked}
                 changed = []
-                for r, v in cfg["roles"].items():
-                    if v.get("provider") == prov and (not v.get("model") or (ids and v["model"] not in ids) or v["model"] == cur and cur != model):
-                        changed.append(f"{r}: {v.get('model') or '(없음)'} → {model}")
-                        v["model"] = model
+                if model != cur:     # 내가 고른 모델이 되면 그대로 둔다
+                    changed.append(f"{cur or '(안 고름)'} → {model}")
+                    cfg["models"][prov] = model
                 settings.save_config(cfg)
                 return self._send(200, {"ok": True, "model": model, "models": ranked[:40], "changed": changed})
             if path == "/api/exp/organize":

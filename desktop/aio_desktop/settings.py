@@ -114,6 +114,18 @@ def _file_keys() -> dict:
 
 
 def get_keys() -> dict:
+    out = _get_keys()
+    a = out.get("anthropic", "")
+    if a.startswith("sk-ant-oat"):          # 구독 토큰을 API 키 칸에 넣은 경우 Claude Code 칸으로 옮긴다
+        if not out.get("claudecode"):
+            set_key("claudecode", a)
+            out["claudecode"] = a
+        set_key("anthropic", "")
+        out.pop("anthropic", None)
+    return out
+
+
+def _get_keys() -> dict:
     out = {}
     for prov in SECRET_NAMES:
         v = None

@@ -275,7 +275,12 @@ class Handler(BaseHTTPRequestHandler):
                 if prov in PROVIDERS and prov != "mock":
                     cfg.setdefault("models", {})[prov] = (m or "").strip()
             settings.save_config(cfg)
-            for prov, val in (b.get("keys") or {}).items():
+            keys_in = dict(b.get("keys") or {})
+            v = (keys_in.get("anthropic") or "").strip()
+            if v.startswith("sk-ant-oat"):     # claude setup-token 토큰을 API 키 칸에 넣은 경우 → Claude Code 칸으로 옮김
+                keys_in.pop("anthropic")
+                keys_in["claudecode"] = v
+            for prov, val in keys_in.items():
                 if val == "__delete__":
                     settings.set_key(prov, "")
                 elif val:
@@ -326,7 +331,11 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send(400, {"error": pv.cursor_missing_message(), "install": pv.CURSOR_INSTALL_WIN})
                     pv.chat("cursor", "", settings.get_keys().get("cursor", ""), "Reply with JSON only.", 'Return {"ok": true}.', timeout=120)
                     return self._send(200, {"ok": True, "model": "(Cursor 기본 모델)", "models": [], "changed": []})
-                key = settings.get_keys().get(prov, "")
+                allk = settings.get_keys()
+                key = allk.get(prov, "")
+                if not key and prov == "anthropic" and allk.get("claudecode", "").startswith("sk-ant-oat"):
+                    return self._send(400, {"error": "넣은 키는 'claude setup-token' 구독 토큰이라 'Claude Code (구독)' 칸으로 옮겼습니다. "
+                                                     "역할별 AI를 'Claude Code (구독)'으로 바꾸고, 그 칸의 '연결 확인'을 누르세요."})
                 if not key:
                     return self._send(400, {"error": "키가 비어 있습니다"})
                 cfg = settings.load_config()

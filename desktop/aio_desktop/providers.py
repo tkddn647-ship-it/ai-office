@@ -48,6 +48,9 @@ def list_models(provider: str, key: str) -> list[str]:
         d = _get("https://api.openai.com/v1/models", {"authorization": f"Bearer {key}"})
         return [m["id"] for m in d.get("data", []) if re.match(r"(gpt|o\d|chatgpt)", m.get("id", ""))]
     if provider == "anthropic":
+        if key.startswith("sk-ant-oat"):
+            raise ProviderError("이 키는 'claude setup-token'으로 만든 구독 토큰이라 Claude API 칸에서는 안 됩니다. "
+                                "'Claude Code (구독)' 칸으로 옮겼으니, 역할별 AI를 'Claude Code (구독)'으로 바꾸고 그 칸에서 연결 확인을 누르세요.")
         d = _get("https://api.anthropic.com/v1/models?limit=100", {"x-api-key": key, "anthropic-version": "2023-06-01"})
         return [m["id"] for m in d.get("data", [])]
     if provider == "gemini":
@@ -363,6 +366,9 @@ def _chat(provider: str, model: str, key: str, system: str, user: str,
         u = d.get("usage", {})
         return text, {"in": u.get("prompt_tokens", 0), "out": u.get("completion_tokens", 0)}
 
+    if provider == "anthropic" and key.startswith("sk-ant-oat"):
+        raise ProviderError("이 키는 'claude setup-token'으로 만든 구독 토큰이라 Claude API 칸에서는 안 됩니다. "
+                            "왼쪽 'Claude Code (구독)' 칸에 넣고, 역할별 AI를 'Claude Code (구독)'으로 바꾸세요.")
     if provider == "anthropic":
         content = user
         if files:

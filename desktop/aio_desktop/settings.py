@@ -29,7 +29,14 @@ DEFAULT = {
         "planner": {"provider": "anthropic", "model": PROVIDERS["anthropic"]["default_model"]},
         "builder": {"provider": "openai", "model": PROVIDERS["openai"]["default_model"]},
         "reviewer": {"provider": "gemini", "model": PROVIDERS["gemini"]["default_model"]},
+        "advisor": {"provider": "openai", "model": PROVIDERS["openai"]["default_model"]},
+        "writer": {"provider": "anthropic", "model": PROVIDERS["anthropic"]["default_model"]},
+        "judge": {"provider": "openai", "model": PROVIDERS["openai"]["default_model"]},
     },
+    # 화면 입력을 다음 실행에도 남겨 둔다 (포트가 매번 바뀌어 브라우저 저장소를 못 쓰므로)
+    "security": {"exposed": True, "data_level": 1},
+    "jaso": {"exp_dir": "", "company": "", "role": "", "jd": "", "company_info": "", "questions": [],
+             "target_ai": 2, "target_avg": 3.5, "max_rounds": 3},
 }
 
 

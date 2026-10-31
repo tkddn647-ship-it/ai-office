@@ -90,6 +90,20 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
 
 def demo_mock(system: str, user: str) -> str:
     """키 없이 흐름을 시험해 보는 가짜 AI. 작업 폴더에 AI_OFFICE_DEMO.md 한 파일만 만든다."""
+    if "조치안 작성 보조" in system:
+        items = [{"key": x.get("key"), "why": "가짜 AI 설명입니다.", "action": f"{x.get('fixed') or '고쳐진 버전'}으로 올리기",
+                  "ticket": f"[보안] {x.get('package')} 업그레이드"} for x in json.loads(user)]
+        return json.dumps({"items": items}, ensure_ascii=False)
+    if "자기소개서를 함께 쓰는" in system:
+        import re as _re
+        ids = sorted({int(n) for n in _re.findall(r"^Q(\d+)\.", user, _re.M)}) or [1]
+        return json.dumps({"answers": [{"id": i, "text": f"[데모 소제목 {i}: 숫자 1개 포함]\n가짜 AI가 쓴 데모 문장입니다. [공고]"} for i in ids],
+                           "note": "데모라 경험 기록을 읽지 않았습니다."}, ensure_ascii=False)
+    if "서류 심사 패널" in system:
+        import re as _re
+        ids = sorted({int(n) for n in _re.findall(r"^## Q(\d+)\.", user, _re.M)}) or [1]
+        return json.dumps({"questions": [{"id": i, "verdict": "통과", "score": 4, "points": [], "fix": "", "ai": 1} for i in ids],
+                           "overall": "데모 심사입니다."}, ensure_ascii=False)
     if "팀장" in system:
         return json.dumps({"summary": "데모: 파일 하나 만들기", "chat": "가짜 AI로 흐름만 시험합니다.",
                            "tasks": [{"title": "데모 파일 만들기", "instructions": "AI_OFFICE_DEMO.md 생성",

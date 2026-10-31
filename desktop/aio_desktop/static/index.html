@@ -39,12 +39,26 @@ button:disabled{opacity:.45;cursor:default}
 #diffbox .add{color:#7ee2a8} #diffbox .del{color:#ff9b91} #diffbox .hd{color:#8fb4ff}
 #status{font-size:12px;color:var(--sub);padding:6px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
 .empty{color:var(--sub);font-size:13px;line-height:1.7;max-width:640px}
+#tabs{display:flex;gap:4px;padding:8px 18px 0;background:var(--panel)}
+#tabs button{background:#eef1f6;color:var(--ink);border-radius:6px 6px 0 0}
+#tabs button.on{background:var(--accent);color:#fff}
+.form{border-top:1px solid var(--line);background:var(--panel);padding:12px 18px;max-height:46vh;overflow:auto}
+.form textarea{height:70px;resize:vertical}
+.q{border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0}
+table.t{border-collapse:collapse;font-size:12.5px;margin-top:6px;white-space:normal}
+table.t td,table.t th{border:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:top}
+table.t th{background:#f2f4f8}
+.g-긴급{color:var(--bad);font-weight:700}.g-우선{color:var(--warn);font-weight:700}
+.bad-t{color:var(--bad)} .warn-t{color:var(--warn)} .ok-t{color:var(--ok)}
+details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--accent)}
+.ans{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0;background:#fcfcfd}
+.only{display:none}
 </style>
 </head>
 <body>
 <aside>
   <h1>AI Office Desktop</h1>
-  <div class="hint">AI 셋이 기획·구현·리뷰를 나눠 맡고, 마지막 승인은 사람이 합니다. 파일은 고른 작업 폴더 안에서만 바뀝니다.</div>
+  <div class="hint">코드 작업·보안 점검·자소서를 AI 여러 명이 나눠 맡고, 마지막 결정은 사람이 합니다. 파일은 고른 폴더 안에서만 바뀝니다.</div>
 
   <h2>작업 폴더</h2>
   <div class="row"><input id="workspace" placeholder="C:\projects\my-app"><button class="ghost" style="flex:none" onclick="browse()">찾기</button></div>
@@ -68,14 +82,46 @@ button:disabled{opacity:.45;cursor:default}
 </aside>
 
 <main>
+  <div id="tabs">
+    <button data-m="code" onclick="setMode('code')">코드 작업</button>
+    <button data-m="security" onclick="setMode('security')">보안 점검</button>
+    <button data-m="jaso" onclick="setMode('jaso')">자소서</button>
+  </div>
   <div id="status">대기 중</div>
   <div id="feed"><div class="empty">왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한 뒤 아래에 할 일을 적어 주세요.<br>예: "README에 설치 방법 섹션을 추가하고, 오타를 고쳐 줘"<br><br>바뀐 내용은 '변경 보기'로 확인하고, 승인하면 git 저장소일 경우 새 브랜치에 커밋됩니다. 버리면 원래대로 돌아갑니다.</div></div>
   <div id="approval"><span id="approvalText">사람 확인 차례입니다.</span>
-    <button class="ghost" onclick="showDiff()">변경 보기</button>
-    <button class="ok" onclick="act('approve')">승인</button>
-    <button class="bad" onclick="act('discard')">버리기</button></div>
+    <button class="ghost" id="b_diff" onclick="showDiff()">변경 보기</button>
+    <button class="ok" id="b_ok" onclick="act('approve')">승인</button>
+    <button class="bad" id="b_no" onclick="act('discard')">버리기</button></div>
+  <div id="secForm" class="form only" data-for="security">
+    <div class="hint">작업 폴더의 requirements*.txt(== 고정), Pipfile.lock, poetry.lock, package-lock.json을 읽어 부품 목록을 만들고 OSV·CISA KEV·FIRST EPSS 공개 자료로 등급을 매깁니다.
+      등급은 규칙이 계산하고, AI는 긴급·우선 항목의 조치안 문장만 씁니다. 코드는 바꾸지 않고 보고서만 <b>ai-office-security</b> 폴더에 남깁니다.
+      AI에는 패키지 이름·버전·취약점 정보만 보내고 소스 코드는 보내지 않습니다.</div>
+    <div class="row" style="margin-top:8px">
+      <div><label>인터넷에 노출된 서비스인가</label><select id="s_exposed"><option value="1">예 · 외부에서 접속</option><option value="0">아니오 · 내부 전용</option></select></div>
+      <div><label>다루는 데이터 등급</label><select id="s_data"><option value="0">0 · 공개 정보</option><option value="1">1 · 내부 정보</option><option value="2">2 · 개인정보</option><option value="3">3 · 결제·인증 정보</option></select></div>
+    </div>
+  </div>
+  <div id="jasoForm" class="form only" data-for="jaso">
+    <div class="hint">경험 기록 폴더의 .md·.txt만 근거로 씁니다. 기록에 없는 수치·역할은 [확인 필요]로 남깁니다.
+      <b class="warn-t">경험 기록과 공고 내용이 고른 AI 회사로 전송됩니다.</b> 무료 요금제는 입력을 사람이 검토하거나 학습에 쓸 수 있으니, 주민번호·연락처 같은 정보는 기록에서 빼 주세요.</div>
+    <label>경험 기록 폴더</label>
+    <div class="row"><input id="j_exp" placeholder="C:\Users\me\경험기록"><button class="ghost" style="flex:none" onclick="browseTo('j_exp')">찾기</button></div>
+    <div class="row"><div><label>회사</label><input id="j_company"></div><div><label>직무</label><input id="j_role"></div></div>
+    <label>공고 원문 (담당업무·자격요건·우대사항)</label><textarea id="j_jd"></textarea>
+    <label>회사 정보 (출처 있는 것만, 선택)</label><textarea id="j_info" style="height:50px"></textarea>
+    <label>문항</label><div id="j_qs"></div>
+    <button class="ghost" onclick="addQ()">문항 추가</button>
+    <div class="row" style="margin-top:6px">
+      <div><label>AI 의심 목표 (이하)</label><input id="j_ai" type="number" min="0" max="5" step="0.5"></div>
+      <div><label>심사 평균 목표 (이상)</label><input id="j_avg" type="number" min="1" max="5" step="0.5"></div>
+      <div><label>최대 심사 횟수</label><input id="j_rounds" type="number" min="1" max="5"></div>
+    </div>
+    <div class="hint" id="j_calls"></div>
+  </div>
   <div id="bar">
-    <textarea id="task" placeholder="할 일을 적어 주세요 (Ctrl+Enter로 시작)"></textarea>
+    <textarea id="task" class="only" data-for="code" placeholder="할 일을 적어 주세요 (Ctrl+Enter로 시작)"></textarea>
+    <div style="flex:1" class="only" data-for="security jaso"></div>
     <button id="go" onclick="start()">시작</button>
     <button class="ghost" onclick="api('/api/stop',{})">멈춤</button>
   </div>
@@ -84,10 +130,32 @@ button:disabled{opacity:.45;cursor:default}
 
 <script>
 const TOKEN="__TOKEN__";
-const ROLES={planner:["팀장 · 기획","🧑‍💼"],builder:["개발 · 구현","👷"],reviewer:["리뷰","🔍"]};
-const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️"};
-const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템"};
-let PROV={}, since=0, timer=null;
+const ROLES={planner:["팀장 · 기획","code"],builder:["개발 · 구현","code"],reviewer:["리뷰","code"],
+  advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["심사관 5명","jaso"]};
+const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️",scanner:"🛰️",advisor:"🛡️",writer:"✍️",judge:"⚖️"};
+const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템",scanner:"스캐너",advisor:"조치안",writer:"작성",judge:"심사"};
+const JNAME={hr:"인사담당",lead:"현업 팀장",interview:"면접관",rival:"경쟁 지원자",jd:"공고 대조"};
+let PROV={}, since=0, timer=null, MODE="code", RUNMODE="code";
+function setMode(m){ MODE=m;
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
+  document.querySelectorAll(".only").forEach(e=>e.style.display=e.dataset.for.split(" ").includes(m)?"block":"none");
+  document.querySelectorAll(".rolebox").forEach(e=>e.style.display=e.dataset.for===m?"":"none");
+}
+function qRow(q={}){ const box=el("div",{className:"q"});
+  box.append(el("textarea",{className:"qt",value:q.text||"",placeholder:"문항 원문",style:"height:44px"}));
+  const lim=el("input",{className:"ql",type:"number",value:q.limit||1000,placeholder:"글자수"});
+  const cnt=el("select",{className:"qc"}); [["with_spaces","공백 포함"],["without_spaces","공백 제외"],["bytes","바이트"]].forEach(([v,t])=>cnt.append(el("option",{value:v,textContent:t})));
+  cnt.value=q.count||"with_spaces";
+  box.append(el("div",{className:"row"},[lim,cnt,el("button",{className:"ghost",textContent:"삭제",style:"flex:none",onclick:()=>{box.remove();calls()}})]));
+  return box;
+}
+function addQ(q){ document.getElementById("j_qs").append(qRow(q)); calls(); }
+function calls(){ const r=parseInt(document.getElementById("j_rounds").value||"3");
+  document.getElementById("j_calls").textContent=`AI 호출은 최대 ${1+r*5+(r-1)}회입니다 (작성 1 + 심사마다 심사관 5 + 수정). 요금은 키 주인에게 청구됩니다.`; }
+function jasoVals(){ const qs=[...document.querySelectorAll("#j_qs .q")].map(b=>({text:b.querySelector(".qt").value.trim(),limit:parseInt(b.querySelector(".ql").value||"1000"),count:b.querySelector(".qc").value})).filter(q=>q.text);
+  const v=id=>document.getElementById(id).value;
+  return {exp_dir:v("j_exp").trim(),company:v("j_company"),role:v("j_role"),jd:v("j_jd"),company_info:v("j_info"),questions:qs,
+    target_ai:parseFloat(v("j_ai")||"2"),target_avg:parseFloat(v("j_avg")||"3.5"),max_rounds:parseInt(v("j_rounds")||"3")}; }
 
 async function api(p,body){
   const r=await fetch(p,{method:body?"POST":"GET",headers:{"x-token":TOKEN,"content-type":"application/json"},body:body?JSON.stringify(body):undefined});
@@ -95,19 +163,25 @@ async function api(p,body){
   if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
   return j;
 }
-function el(t,a={},kids=[]){const e=document.createElement(t);Object.assign(e,a);kids.forEach(k=>e.append(k));return e}
+function el(t,a={},kids=[]){const e=document.createElement(t);const {dataset,...rest}=a;Object.assign(e,rest);if(dataset)Object.assign(e.dataset,dataset);kids.forEach(k=>e.append(k));return e}
 
 async function load(){
   const j=await api("/api/config"); PROV=j.providers; const c=j.config;
   ["workspace","test_command","max_tasks","max_fix_rounds","max_calls"].forEach(k=>document.getElementById(k).value=c[k]??"");
   const roles=document.getElementById("roles"); roles.innerHTML="";
-  for(const [r,[lab]] of Object.entries(ROLES)){
+  for(const [r,[lab,m]] of Object.entries(ROLES)){
     const sel=el("select",{id:"p_"+r}); for(const [k,v] of Object.entries(PROV)) sel.append(el("option",{value:k,textContent:v.label}));
     sel.value=c.roles[r].provider;
     const mod=el("input",{id:"m_"+r,value:c.roles[r].model,placeholder:"모델 이름"});
     sel.onchange=()=>{mod.value=PROV[sel.value].default_model};
-    roles.append(el("label",{textContent:lab}),el("div",{className:"row"},[sel,mod]));
+    roles.append(el("div",{className:"rolebox",dataset:{for:m}},[el("label",{textContent:lab}),el("div",{className:"row"},[sel,mod])]));
   }
+  const sc=c.security||{}; document.getElementById("s_exposed").value=sc.exposed===false?"0":"1"; document.getElementById("s_data").value=String(sc.data_level??1);
+  const j2=c.jaso||{}; document.getElementById("j_exp").value=j2.exp_dir||""; document.getElementById("j_company").value=j2.company||"";
+  document.getElementById("j_role").value=j2.role||""; document.getElementById("j_jd").value=j2.jd||""; document.getElementById("j_info").value=j2.company_info||"";
+  document.getElementById("j_ai").value=j2.target_ai??2; document.getElementById("j_avg").value=j2.target_avg??3.5; document.getElementById("j_rounds").value=j2.max_rounds??3;
+  document.getElementById("j_qs").innerHTML=""; (j2.questions&&j2.questions.length?j2.questions:[{}]).forEach(q=>addQ(q));
+  document.getElementById("j_rounds").oninput=calls; setMode(MODE);
   document.getElementById("keystore").textContent="저장 위치: "+j.key_store+". 키는 이 PC에서 각 회사 API로만 보냅니다.";
   const keys=document.getElementById("keys"); keys.innerHTML="";
   for(const [k,v] of Object.entries(PROV)){ if(k==="mock")continue;
@@ -121,10 +195,13 @@ async function save(){
   const keys={}; for(const k of Object.keys(PROV)){ if(k==="mock")continue; const v=document.getElementById("k_"+k).value; if(v) keys[k]=v; }
   const n=id=>parseInt(document.getElementById(id).value||"0");
   await api("/api/config",{workspace:document.getElementById("workspace").value.trim(),test_command:document.getElementById("test_command").value,
-    max_tasks:n("max_tasks"),max_fix_rounds:n("max_fix_rounds"),max_calls:n("max_calls"),roles,keys});
-  document.getElementById("saved").textContent="저장했습니다"; setTimeout(()=>document.getElementById("saved").textContent="",2000); load();
+    max_tasks:n("max_tasks"),max_fix_rounds:n("max_fix_rounds"),max_calls:n("max_calls"),roles,keys,
+    security:{exposed:document.getElementById("s_exposed").value==="1",data_level:parseInt(document.getElementById("s_data").value)},
+    jaso:jasoVals()});
+  document.getElementById("saved").textContent="저장했습니다"; setTimeout(()=>document.getElementById("saved").textContent="",2000); await load();
 }
-async function browse(){ const j=await api("/api/browse",{}); if(j.path) document.getElementById("workspace").value=j.path; }
+async function browse(){ browseTo("workspace") }
+async function browseTo(id){ const j=await api("/api/browse",{}); if(j.path) document.getElementById(id).value=j.path; }
 
 function render(ev){
   const feed=document.getElementById("feed"); if(feed.querySelector(".empty")) feed.innerHTML="";
@@ -137,23 +214,68 @@ function render(ev){
   if(ev.files&&ev.files.length) bub.append(el("div",{className:"files",textContent:"바꾼 파일: "+ev.files.join(", ")}));
   if(ev.usage){ const u=Object.entries(ev.usage).map(([r,x])=>`${NAME[r]||r} ${x.provider}/${x.model}: ${x.calls}회, 입력 ${x.in} · 출력 ${x.out} 토큰`).join("\n");
     bub.append(el("div",{className:"files",textContent:u})); }
+  if(ev.kind==="report") bub.append(reportView(ev.report));
+  if(ev.kind==="scores") bub.append(scoresView(ev));
+  if(ev.kind==="final") bub.append(finalView(ev));
   feed.append(el("div",{className:cls},[el("div",{className:"av",textContent:ICON[ev.role]||"•"}),bub]));
   feed.scrollTop=feed.scrollHeight;
 }
+function td(t,c){ return el("td",{textContent:t??"",className:c||""}) }
+function reportView(r){ const box=el("div");
+  const tb=el("table",{className:"t"}); tb.append(el("tr",{},["등급","점수","패키지","취약점","KEV","EPSS","사용 흔적","고쳐진 버전","조치안"].map(h=>el("th",{textContent:h}))));
+  r.rows.forEach(x=>tb.append(el("tr",{},[td(x.grade,"g-"+x.grade),td(x.score),td(x.package+" "+x.version),td(x.cve||x.id),td(x.kev?"예":""),
+    td(x.epss==null?"":x.epss.toFixed(3)),td(x.trace==null?"미확인":(x.trace.slice(0,2).join(", ")||"직접 import 없음")),
+    td(x.fixed+(x.fixed_exists===false?" ⚠ 저장소에 없음":"")),td(x.action||"")])));
+  box.append(el("div",{className:"files",textContent:`부품 ${r.components}개 · `+Object.entries(r.counts).map(([k,v])=>k+" "+v).join(", ")+" · 사용 흔적은 import 검색이라 실제 호출을 보장하지 않습니다."}));
+  if(r.rows.length) box.append(tb);
+  if(r.rows.some(x=>(x.grade==="긴급"||x.grade==="우선")&&x.fixed&&x.fixed_exists))
+    box.append(el("div",{style:"margin-top:8px"},[el("button",{textContent:"수정 맡기기 (코드 작업으로)",onclick:handoff})]));
+  return box; }
+async function handoff(){ try{ const j=await api("/api/fix_task",{}); if(!j.task) return alertBox("올릴 버전이 확인된 긴급·우선 항목이 없습니다");
+  setMode("code"); document.getElementById("task").value=j.task; render({role:"system",kind:"info",time:"",text:"요청을 아래 칸에 넣었습니다. 읽어 보고 시작을 누르세요. 승인 전 diff를 꼭 확인하세요."}); }catch(e){ alertBox(e.message) } }
+function scoresView(ev){ const box=el("div");
+  const tb=el("table",{className:"t"}); tb.append(el("tr",{},["문항","글자수","심사 평균","최저","AI 의심"].map(h=>el("th",{textContent:h}))));
+  ev.questions.forEach(q=>{ const s=ev.summary[q.id]||{}, m=(ev.mech.per_q||{})[q.id]||{};
+    tb.append(el("tr",{},[td("Q"+q.id),td(`${m.chars??"?"}/${q.limit}`,m.chars>q.limit?"bad-t":""),td(s.avg),td(s.min),td(s.ai,s.ai==null?"warn-t":s.ai<=2?"ok-t":"bad-t")])) });
+  box.append(tb);
+  if(ev.mech.errors.length) box.append(el("div",{className:"bad-t files",textContent:"규칙 오류: "+ev.mech.errors.join(" / ")}));
+  if(ev.mech.warnings.length) box.append(el("div",{className:"warn-t files",textContent:"주의: "+ev.mech.warnings.join(" / ")}));
+  const det=el("details"); det.append(el("summary",{textContent:"심사관별 지적 보기"}));
+  for(const [k,v] of Object.entries(ev.panel||{})){
+    if(v.error){ det.append(el("div",{className:"bad-t",textContent:`${JNAME[k]}: 실패 · ${v.error}`})); continue }
+    det.append(el("div",{style:"font-weight:700;margin-top:6px",textContent:`${JNAME[k]} — ${v.overall||""}`}));
+    (v.questions||[]).forEach(x=>det.append(el("div",{textContent:`Q${x.id} ${x.verdict||""} ${x.score??""}점${x.ai!=null?" · AI "+x.ai:""}\n`+[...(x.points||[]),...(x.ai_points||[])].map(p=>" - "+p).join("\n")+(x.fix?"\n → "+x.fix:"")})));
+  }
+  box.append(det); return box; }
+function finalView(ev){ const box=el("div");
+  ev.questions.forEach(q=>{ const t=ev.final[q.id]||""; const a=el("div",{className:"ans"});
+    const n=q.count==="without_spaces"?t.replace(/\s/g,"").length:q.count==="bytes"?[...t].reduce((s,c)=>s+(c.charCodeAt(0)>127?2:1),0):t.length;
+    a.append(el("div",{className:"who",textContent:`Q${q.id} · ${n}/${q.limit}자`}),el("div",{textContent:t}),
+      el("button",{className:"ghost",textContent:"복사",style:"margin-top:6px",onclick:()=>navigator.clipboard.writeText(t)}));
+    box.append(a) });
+  return box; }
 async function poll(){
   try{
     const j=await api("/api/events?since="+since);
     j.events.forEach(e=>{render(e);since=e.i+1});
-    const st={idle:"대기 중",running:"작업 중…",waiting_approval:"사람 확인 대기",failed:"멈춤 · 변경 내용 확인 가능",done:"완료",discarded:"되돌림"}[j.state]||j.state;
+    const st={idle:"대기 중",running:"작업 중…",waiting_approval:"사람 확인 대기",failed:"멈춤",done:"완료",discarded:"닫음"}[j.state]||j.state;
     document.getElementById("status").textContent=st;
-    document.getElementById("approval").style.display=(j.state==="waiting_approval"||j.state==="failed")?"flex":"none";
+    RUNMODE=j.mode||"code";
+    const show=(j.state==="waiting_approval"||j.state==="failed");
+    document.getElementById("approval").style.display=show?"flex":"none";
+    document.getElementById("b_diff").style.display=RUNMODE==="code"?"":"none";
+    document.getElementById("b_ok").style.display=(RUNMODE==="security"||(RUNMODE==="jaso"&&j.state==="failed"))?"none":"";
+    document.getElementById("b_ok").textContent=RUNMODE==="jaso"?"파일로 저장":"승인";
+    document.getElementById("b_no").textContent=RUNMODE==="code"?"버리기":"닫기";
+    document.getElementById("approvalText").textContent=RUNMODE==="jaso"?"최종안을 확인하고 저장하거나 닫아 주세요. 저장하면 경험 기록 폴더 안 ai-office-jaso에 남깁니다.":
+      RUNMODE==="security"?"점검이 멈췄습니다.":"사람 확인 차례입니다.";
     document.getElementById("go").disabled=(j.state==="running"||j.state==="waiting_approval");
     if(j.state!=="running"&&timer&&j.state!=="idle"){ /* 계속 폴링해 승인 결과까지 받음 */ }
   }catch(e){ document.getElementById("status").textContent="서버 연결 끊김: "+e.message }
 }
 async function start(){
-  const t=document.getElementById("task").value.trim(); if(!t) return;
-  try{ await save(); since=0; document.getElementById("feed").innerHTML=""; await api("/api/run",{task:t}); document.getElementById("task").value=""; }
+  const t=document.getElementById("task").value.trim(); if(MODE==="code"&&!t) return;
+  try{ await save(); since=0; document.getElementById("feed").innerHTML=""; await api("/api/run",{mode:MODE,task:t}); if(MODE==="code") document.getElementById("task").value=""; }
   catch(e){ alertBox(e.message) }
 }
 function alertBox(m){ render({role:"system",kind:"error",text:m,time:""}) }

@@ -12,7 +12,9 @@ from importlib import resources
 from urllib.parse import urlparse
 
 from . import settings
+from .jaso import JasoRun
 from .orchestrator import Run
+from .security import SecurityRun
 from .providers import PROVIDERS
 from .workspace import Workspace, WorkspaceError
 
@@ -22,7 +24,8 @@ TOKEN = secrets.token_urlsafe(24)
 class State:
     lock = threading.Lock()
     events: list[dict] = []
-    run: Run | None = None
+    run = None          # Run | SecurityRun | JasoRun
+    mode = "code"
     thread: threading.Thread | None = None
 
 
@@ -103,10 +106,12 @@ class Handler(BaseHTTPRequestHandler):
             with State.lock:
                 evs = State.events[since:]
                 st = State.run.state if State.run else "idle"
-            return self._send(200, {"events": evs, "state": st})
+            return self._send(200, {"events": evs, "state": st, "mode": State.mode})
         if path == "/api/diff":
             r = State.run
-            return self._send(200, {"diff": r.ws.diff() if r else "", "changed": r.ws.changed() if r else []})
+            if not isinstance(r, Run):
+                return self._send(200, {"diff": "", "changed": []})
+            return self._send(200, {"diff": r.ws.diff(), "changed": r.ws.changed()})
         return self._send(404, {"error": "없는 주소"})
 
     # ---------- POST ----------
@@ -120,6 +125,9 @@ class Handler(BaseHTTPRequestHandler):
             for k in ("workspace", "test_command", "lang", "max_tasks", "max_fix_rounds", "max_calls"):
                 if k in b:
                     cfg[k] = b[k]
+            for k in ("security", "jaso"):
+                if isinstance(b.get(k), dict):
+                    cfg[k] = {**cfg.get(k, {}), **b[k]}
             for role, v in (b.get("roles") or {}).items():
                 if role in cfg["roles"] and v.get("provider") in PROVIDERS:
                     cfg["roles"][role] = {"provider": v["provider"], "model": (v.get("model") or "").strip()}
@@ -135,26 +143,51 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/run":
             if State.run and State.run.state in ("running", "waiting_approval"):
                 return self._send(409, {"error": "이전 작업을 먼저 승인하거나 버려 주세요"})
-            task = (b.get("task") or "").strip()
-            if not task:
-                return self._send(400, {"error": "요청을 적어 주세요"})
+            mode = b.get("mode") or "code"
             cfg = settings.load_config()
+            keys = settings.get_keys()
+            mock = getattr(self.server, "mock", None)
             try:
-                Workspace(cfg.get("workspace") or "")
+                if mode == "code":
+                    task = (b.get("task") or "").strip()
+                    if not task:
+                        return self._send(400, {"error": "요청을 적어 주세요"})
+                    Workspace(cfg.get("workspace") or "")
+                    first, run = task, Run(cfg, keys, task, _push, mock=mock)
+                elif mode == "security":
+                    first = "의존성 취약점 점검을 시작합니다."
+                    run = SecurityRun(cfg, keys, cfg.get("security") or {}, _push, mock=mock,
+                                      **({"fetch": self.server.fetch} if getattr(self.server, "fetch", None) else {}))
+                elif mode == "jaso":
+                    opts = cfg.get("jaso") or {}
+                    if not opts.get("exp_dir"):
+                        return self._send(400, {"error": "경험 기록 폴더를 골라 주세요"})
+                    first = f"{opts.get('company', '')} {opts.get('role', '')} 자소서 작성을 시작합니다."
+                    run = JasoRun(cfg, keys, opts, _push, mock=mock)
+                else:
+                    return self._send(400, {"error": "모르는 모드"})
             except WorkspaceError as e:
                 return self._send(400, {"error": str(e)})
             with State.lock:
                 State.events = []
-            _push({"time": "", "role": "user", "kind": "chat", "text": task})
-            State.run = Run(cfg, settings.get_keys(), task, _push, mock=getattr(self.server, "mock", None))
+                State.mode = mode
+            _push({"time": "", "role": "user", "kind": "chat", "text": first})
+            State.run = run
             State.thread = threading.Thread(target=State.run.run, daemon=True)
             State.thread.start()
             return self._send(200, {"ok": True})
+        if path == "/api/fix_task":
+            r = State.run
+            if not isinstance(r, SecurityRun):
+                return self._send(409, {"error": "보안 점검 결과가 없습니다"})
+            return self._send(200, {"task": r.fix_task()})
         if path in ("/api/approve", "/api/discard"):
             r = State.run
             if not r or r.state not in ("waiting_approval", "failed"):
                 return self._send(409, {"error": "승인·버리기할 작업이 없습니다"})
-            msg = r.approve() if path == "/api/approve" else r.discard()
+            if path == "/api/approve" and (not hasattr(r, "approve") or r.state == "failed" and isinstance(r, JasoRun)):
+                return self._send(409, {"error": "저장할 결과가 없습니다. 닫기를 눌러 주세요"})
+            msg =r.approve() if path == "/api/approve" else r.discard()
             return self._send(200, {"ok": True, "message": msg})
         if path == "/api/stop":
             if State.run:
@@ -163,7 +196,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "없는 주소"})
 
 
-def serve(port: int = 0, mock=None) -> ThreadingHTTPServer:
+def serve(port: int = 0, mock=None, fetch=None) -> ThreadingHTTPServer:
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     httpd.mock = mock
+    httpd.fetch = fetch   # 시험용: 보안 모드의 공개 API 호출을 가짜로 바꿀 때
     return httpd

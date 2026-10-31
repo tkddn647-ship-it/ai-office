@@ -251,7 +251,7 @@ const JNAME={hr:"인사담당",lead:"현업 팀장",interview:"면접관",rival:
 const EMPTY={code:'왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한 뒤 아래에 할 일을 적어 주세요.<br>예: "README에 설치 방법 섹션을 추가하고, 오타를 고쳐 줘"<br><br>바뀐 내용은 \'변경 보기\'로 확인하고, 승인하면 git 저장소일 경우 새 브랜치에 커밋됩니다. 버리면 원래대로 돌아갑니다.',
   security:"작업 폴더를 고르고 노출 여부·데이터 등급을 정한 뒤 시작을 누르세요. 결과 표가 여기에 나옵니다.",
   jaso:"① 내 경험·활동: 보고서·PDF·사진·메모를 넣어 경험을 만들고<br>② 작성 가이드: 취업 특강 자료가 있으면 넣고 (선택)<br>③ 지원서: 공고·문항 캡처를 넣은 뒤 'AI로 작성 + 심사'를 누르세요.<br><br>진행 상황과 심사 점수가 여기에 나옵니다. 처음이면 왼쪽 아래 '처음 설정 안내'를 누르세요."};
-let CFG={}; let PROV={}, since=0, timer=null, MODE="code", RUNMODE="code";
+let CFG={}; let READY=[]; let CLI={}; let PROV={}, since=0, timer=null, MODE="code", RUNMODE="code";
 function setMode(m){ MODE=m; UI.mode=m; uiSave();
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
   document.querySelectorAll(".only").forEach(e=>e.style.display=e.dataset.for.split(" ").includes(m)?(e.dataset.disp||"block"):"none");
@@ -269,8 +269,18 @@ async function api(p,body){
 }
 function el(t,a={},kids=[]){const e=document.createElement(t);const {dataset,...rest}=a;Object.assign(e,rest);if(dataset)Object.assign(e.dataset,dataset);kids.forEach(k=>e.append(k));return e}
 
+async function cliRun(tool,action){ try{ const r=await api("/api/cli",{tool,action});
+    render({role:"system",kind:"info",time:"",text:"PowerShell 창을 열었습니다. 그 창의 안내를 따라 주세요.\n실행한 명령: "+r.command}); }
+  catch(e){ alertBox(e.message) } }
+function cliBox(tool){ const isC=tool==="claude"; const path=isC?CLI.claude:CLI.cursor;
+  const st=el("div",{className:"hint",textContent:path?("✓ 설치됨: "+path):(isC?"✗ Claude Code가 설치돼 있지 않습니다.":(CLI.cursor_editor?"✗ Cursor 편집기는 있지만 Cursor CLI는 따로 설치해야 합니다.":"✗ Cursor CLI가 설치돼 있지 않습니다."))});
+  const b1=el("button",{className:"ghost",textContent:"설치",style:"flex:none",onclick:()=>{ if(window.confirm("공식 설치 명령을 PowerShell 창에서 실행할까요?\n"+(isC?"irm https://claude.ai/install.ps1 | iex":"irm 'https://cursor.com/install?win32=true' | iex"))) cliRun(tool,"install"); }});
+  const b2=el("button",{className:"ghost",textContent:isC?"로그인·토큰 만들기":"로그인",style:"flex:none",onclick:()=>cliRun(tool,"login")});
+  const b3=el("button",{className:"ghost",textContent:"다시 확인",style:"flex:none",onclick:async()=>{ CLI=await api("/api/cli"); load(); }});
+  return el("div",{},[st,el("div",{className:"row",style:"flex-wrap:wrap;margin-top:4px"},[b1,b2,b3])]); }
 async function load(){
-  const j=await api("/api/config"); PROV=j.providers; const c=j.config;
+  const j=await api("/api/config"); PROV=j.providers; const c=j.config; READY=j.ready||[];
+  try{ CLI=await api("/api/cli"); }catch(e){ CLI={}; }
   ["workspace","test_command","max_tasks","max_fix_rounds","max_calls"].forEach(k=>document.getElementById(k).value=c[k]??"");
   document.getElementById("test_auto").checked=!!c.test_auto;
   CFG=c; const roles=document.getElementById("roles"); roles.innerHTML="";
@@ -305,10 +315,10 @@ async function load(){
     keys.append(el("label",{innerHTML:"<b>"+v.label+"</b>"+(j.keys_set[k]?' <span class="keyset">● 키 저장됨</span>':'')}),el("div",{className:"row"},[inp,chk,del]));
     // 모델 고르기
     const cur=(c.models||{})[k]||""; const lst=((c.model_lists||{})[k]||{});
-    if(k==="cursor"){ keys.append(el("input",{id:"mdl_"+k,value:cur,placeholder:"모델 (비우면 Cursor 기본 모델)",style:"margin-top:4px"})); continue; }
+    if(k==="cursor"){ keys.append(el("input",{id:"mdl_"+k,value:cur,placeholder:"모델 (비우면 Cursor 기본 모델)",style:"margin-top:4px"}),cliBox("cursor")); continue; }
     if(k==="claudecode"){ const cs=el("select",{id:"mdl_"+k,style:"margin-top:4px"}); [["","기본 모델 (Claude Code 설정)"],["sonnet","sonnet (빠르고 무난)"],["opus","opus (가장 꼼꼼, 사용량 많음)"],["haiku","haiku (가장 가벼움)"]].forEach(([v2,t])=>cs.append(el("option",{value:v2,textContent:t})));
       if(cur&&![...cs.options].some(o=>o.value===cur)) cs.append(el("option",{value:cur,textContent:cur})); cs.value=cur; cs.onchange=()=>save();
-      keys.append(cs,el("div",{className:"hint",textContent:"키 칸에는 PowerShell에서 'claude setup-token'으로 만든 토큰을 넣습니다. 비우면 이 PC에서 claude에 로그인된 계정을 씁니다. 사용량은 구독에서 차감됩니다."})); continue; }
+      keys.append(cs,el("div",{className:"hint",textContent:"키 칸에는 '로그인·토큰 만들기'로 나온 sk-ant-oat… 토큰을 넣습니다. 비우면 이 PC에서 claude에 로그인된 계정을 씁니다. 사용량은 구독(Pro·Max·Team)에서 차감됩니다."}),cliBox("claude")); continue; }
     const ms=el("select",{id:"mdl_"+k}); const ids=[...new Set([...(cur?[cur]:[]),...(lst.ids||[])])];
     ms.append(el("option",{value:"",textContent:ids.length?"모델 고르기":"↻ 를 눌러 목록 받기 (키 필요)"}));
     ids.forEach(id=>ms.append(el("option",{value:id,textContent:id+(id===(lst.ids||[])[0]?"  · 추천":"")})));
@@ -385,7 +395,7 @@ function scoresView(ev){ const box=el("div");
   const reqs=((ev.panel||{}).jd||{}).requirements||[];
   if(reqs.length){ const rd=el("details",{open:true}); rd.append(el("summary",{textContent:"공고 항목별 충족 여부"}));
     const rt=el("table",{className:"t"}); rt.append(el("tr",{},["구분","공고 항목","판정","자소서 근거","메모"].map(h=>el("th",{textContent:h}))));
-    reqs.forEach(r=>{ const st=String(r.status||""); rt.append(el("tr",{},[td(r.kind),td(r.item),td(st,st.startsWith("충족")?"ok-t":st.startsWith("부분")?"warn-t":"bad-t"),td(r.where),td(r.note)])) });
+    reqs.forEach(r=>{ const st=String(r.status||""); rt.append(el("tr",{},[td(r.kind),td(r.item),td(st,st.startsWith("충족")?"ok-t":st.startsWith("부분")?"warn-t":st.startsWith("해당")?"":"bad-t"),td(r.where),td(r.note)])) });
     rd.append(rt); box.append(rd); }
   const det=el("details"); det.append(el("summary",{textContent:"심사관별 지적 보기"}));
   for(const [k,v] of Object.entries(ev.panel||{})){
@@ -665,9 +675,9 @@ async function gdDel(){ if(!GD_CUR||!window.confirm(GD_CUR+"를 지울까요? �
 let KEYS_SET={};
 async function refreshChecklist(){
   try{ LIB=await api("/api/lib"); }catch(e){ return }
-  const c=await api("/api/config"); KEYS_SET=c.keys_set; const roles=c.config.roles;
-  const need=[...new Set(["writer","judge","reader"].map(r=>roles[r].provider))].filter(p=>p!=="mock");
-  const keyOk=need.every(p=>KEYS_SET[p]);
+  const c=await api("/api/config"); KEYS_SET=c.keys_set; READY=c.ready||[]; const roles=c.config.roles;
+  const allMock=["writer","judge","reader"].every(r=>roles[r].provider==="mock");
+  const keyOk=allMock||READY.length>0;
   const items=[[keyOk,keyOk?"AI 키 준비됨":"AI 키 넣기",()=>wizOpen()],
     [LIB.experiences.length>0,`경험 ${LIB.experiences.length}개`,()=>jsub("exp")],
     [(LIB.guides||{}).files&&LIB.guides.files.length>0,`작성 가이드 ${((LIB.guides||{}).files||[]).length}개 (선택)`,()=>jsub("gd")],
@@ -696,6 +706,7 @@ function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
     if(WIZ.prov==="claudecode"||WIZ.prov==="cursor"){ const cc=WIZ.prov==="claudecode"; const cmd1=cc?"irm https://claude.ai/install.ps1 | iex":"irm 'https://cursor.com/install?win32=true' | iex", cmd2=cc?"claude setup-token":"agent login";
       const line=(t)=>el("div",{className:"row",style:"margin-top:4px"},[el("code",{textContent:t,style:"flex:1;background:#f2f4f8;padding:6px 8px;border-radius:6px;font-size:12px;overflow:auto"}),
         el("button",{className:"ghost",textContent:"복사",style:"flex:none",onclick:()=>navigator.clipboard.writeText(t)})]);
+      c.append(cliBox(cc?"claude":"cursor"));
       c.append(el("div",{className:"hint",style:"margin-top:8px",innerHTML:cc?"시작 메뉴에서 <b>PowerShell</b>을 열고 첫 줄로 설치한 뒤, <b>새 PowerShell 창</b>에서 둘째 줄을 실행하세요. 브라우저 로그인 후 터미널에 나온 토큰(한 번만 보임)을 복사해 아래 키 칸에 넣습니다. 이미 설치했다면 둘째 줄만.":"<b>Cursor 편집기와 Cursor CLI는 다른 프로그램입니다.</b> 편집기만 깔려 있으면 CLI를 따로 설치해야 합니다. 시작 메뉴에서 <b>PowerShell</b>을 열고 아래 두 줄을 차례로 붙여 넣으세요 (두 번째 줄은 브라우저에서 Cursor 로그인)."}),line(cmd1),line(cmd2)); }
     const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":(WIZ.prov==="cursor"?"Cursor API 키 (CLI에 로그인돼 있으면 비워도 됨)":WIZ.prov==="claudecode"?"claude setup-token 토큰 (sk-ant-oat…)":"API 키 붙여 넣기")}); const out=el("div",{className:"hint"});
     c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">${WIZ.prov==="cursor"||WIZ.prov==="claudecode"?"설치 안내":"여기서 발급"}</a>`}),key,out);

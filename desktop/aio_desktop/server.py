@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 import secrets
@@ -173,7 +174,8 @@ class Handler(BaseHTTPRequestHandler):
             cfg = settings.load_config()
             keys = settings.get_keys()
             return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in settings.SECRET_NAMES},
-                                    "providers": PROVIDERS, "key_store": settings.key_store()})
+                                    "providers": PROVIDERS, "key_store": settings.key_store(),
+                                    "ready": settings.ready_providers(keys)})
         q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
         try:
             if path == "/api/lib":
@@ -200,6 +202,10 @@ class Handler(BaseHTTPRequestHandler):
                 cfg.setdefault("model_lists", {})[prov] = {"at": datetime.now().isoformat(timespec="minutes"), "ids": ranked}
                 settings.save_config(cfg)
                 return self._send(200, {"models": ranked, "all": allm})
+            if path == "/api/cli":
+                from . import providers as pv
+                return self._send(200, {"claude": pv.find_claude_cli(), "cursor": (pv.find_cursor_cli() or [None])[0],
+                                        "cursor_editor": pv.cursor_editor_installed(), "windows": sys.platform == "win32"})
             if path == "/api/guides":
                 lib = _lib()
                 gd = lib.root / "guides"
@@ -294,7 +300,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if path == "/api/read":
                 from .reader import read
-                return self._send(200, read(settings.load_config(), settings.get_keys(), _lib(), b.get("purpose", ""),
+                keys = settings.get_keys()
+                return self._send(200, read(settings.effective_roles(settings.load_config(), keys)[0], keys, _lib(), b.get("purpose", ""),
                                             b.get("files") or [], b.get("text") or "", mock=getattr(self.server, "mock", None)))
             if path == "/api/guide/save":
                 from .reader import save_guide
@@ -349,10 +356,38 @@ class Handler(BaseHTTPRequestHandler):
                     cfg["models"][prov] = model
                 settings.save_config(cfg)
                 return self._send(200, {"ok": True, "model": model, "models": ranked[:40], "changed": changed})
+            if path == "/api/cli":
+                # Claude Code·Cursor CLI 설치·로그인: 공식 명령을 '보이는' PowerShell 창에서 실행 (사용자가 버튼을 눌렀을 때만)
+                from . import providers as pv
+                tool, action = b.get("tool"), b.get("action")
+                if sys.platform != "win32":
+                    return self._send(400, {"error": "이 버튼은 Windows에서만 동작합니다. 터미널에서 직접 실행하세요."})
+                if tool == "claude":
+                    exe = pv.find_claude_cli()
+                    cmd = {"install": pv.CLAUDE_INSTALL_WIN,
+                           "login": f"& '{exe}' setup-token" if exe else None}.get(action)
+                    note = ("설치가 끝나면 이 창을 닫고 앱에서 '로그인·토큰 만들기'를 누르세요." if action == "install" else
+                            "브라우저에서 로그인하면 이 창에 sk-ant-oat… 토큰이 한 번 나옵니다. 복사해서 앱의 Claude Code 칸에 넣으세요.")
+                elif tool == "cursor":
+                    ex = pv.find_cursor_cli()
+                    cmd = {"install": pv.CURSOR_INSTALL_WIN,
+                           "login": ("& '" + "' '".join(ex) + "' login") if ex else None}.get(action)
+                    note = ("설치가 끝나면 이 창을 닫고 앱에서 '로그인'을 누르세요." if action == "install" else
+                            "브라우저에서 Cursor에 로그인하면 끝입니다. 이 창을 닫고 앱에서 '연결 확인'을 누르세요.")
+                else:
+                    return self._send(400, {"error": "모르는 도구"})
+                if not cmd:
+                    return self._send(400, {"error": "먼저 '설치'를 눌러 설치해 주세요."})
+                import subprocess
+                ps = f"Write-Host '{note}' -ForegroundColor Cyan; {cmd}; Write-Host ''; Write-Host '끝났습니다. 이 창을 닫아도 됩니다.' -ForegroundColor Green"
+                subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", ps],
+                                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+                return self._send(200, {"ok": True, "command": cmd})
             if path == "/api/exp/organize":
                 if not (b.get("notes") or "").strip():
                     return self._send(400, {"error": "메모를 적어 주세요"})
-                return self._send(200, organize_experience(settings.load_config(), settings.get_keys(), b["notes"],
+                keys = settings.get_keys()
+                return self._send(200, organize_experience(settings.effective_roles(settings.load_config(), keys)[0], keys, b["notes"],
                                                            mock=getattr(self.server, "mock", None)))
             if path == "/api/app/save":
                 return self._send(200, {"name": _lib().app_save(b)})
@@ -372,8 +407,8 @@ class Handler(BaseHTTPRequestHandler):
             if State.run and State.run.state in ("running", "waiting_approval"):
                 return self._send(409, {"error": "이전 작업을 먼저 승인하거나 버려 주세요"})
             mode = b.get("mode") or "code"
-            cfg = settings.load_config()
             keys = settings.get_keys()
+            cfg, swapped = settings.effective_roles(settings.load_config(), keys)
             mock = getattr(self.server, "mock", None)
             try:
                 if mode == "code":
@@ -403,6 +438,9 @@ class Handler(BaseHTTPRequestHandler):
                 State.events = []
                 State.mode = mode
             _push({"time": "", "role": "user", "kind": "chat", "text": first})
+            if swapped:
+                _push({"time": "", "role": "system", "kind": "info",
+                       "text": "키가 없는 회사로 잡힌 역할을 준비된 회사로 바꿔 씁니다: " + ", ".join(swapped)})
             State.run = run
             State.thread = threading.Thread(target=State.run.run, daemon=True)
             State.thread.start()

@@ -151,6 +151,10 @@ for_office 저장소 폴더를 자료 폴더로 고르면 기존 `experiences/` 
 - **Anthropic (Claude API)**: 콘솔에서 만든 API 키(`sk-ant-api…`)와 충전된 크레딧이 필요합니다. 구독과 별도 결제입니다.
 - **Cursor**: 이 PC에 [Cursor CLI](https://cursor.com/cli)(`cursor-agent`)가 설치돼 있어야 합니다. CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor API 키를 넣습니다. for_office 심사 패널과 같은 방식으로, 빈 임시 폴더에서 화면 없이 실행하고 파일 수정·셸 명령 자동 실행은 허용하지 않습니다. 사용량은 Cursor 요금제에서 차감됩니다. **사진·PDF 읽기는 Cursor로 안 되므로** 그 역할만 다른 AI를 고르세요.
 
+- **설치·로그인 버튼**: Claude Code·Cursor 칸의 **설치** / **로그인·토큰 만들기**를 누르면 공식 명령을 보이는 PowerShell 창에서 실행합니다(누를 때만, 실행 전 확인). 설치 여부도 그 칸에 표시됩니다.
+- **키 하나만 넣어도 동작**: 역할이 키가 없는 회사로 잡혀 있으면, 실행할 때 준비된 회사(키가 있거나 CLI가 설치된 곳)로 바꿔 쓰고 진행 기록에 알립니다. Cursor는 사진·PDF를 못 읽어 그 역할에는 쓰지 않습니다.
+- 구독 토큰(`sk-ant-oat…`)을 Claude API 칸에 넣으면 Claude Code 칸으로 옮깁니다.
+
 ## API 키와 비용
 - 키는 Windows 자격 증명 관리자에 저장합니다. 저장이 안 되는 환경에서는 `%APPDATA%\AIOfficeDesktop\keys.json`에 저장하고 화면에 그 위치를 표시합니다.
 - 키는 각 회사 API로만 보내고, 화면에 다시 표시하지 않습니다.

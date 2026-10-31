@@ -93,13 +93,14 @@ JUDGES = [
 3) 지원동기가 이 회사가 아니어도 그대로 쓸 수 있는 글인가 (회사 이름만 바꾸면 되는가)
 4) 문항끼리 같은 이야기를 반복하는가"""),
     ("jd", "공고 대조", """공고의 담당업무·자격요건·우대사항을 하나씩 체크하는 심사위원. 기준:
-1) 공고 항목을 빠짐없이 뽑아, 항목마다 자소서 어디에서 근거를 댔는지 '충족/부분/없음'으로 판정한다
+1) 공고 항목을 빠짐없이 뽑아, 항목마다 자소서 어디에서 근거를 댔는지 '충족/부분/없음'으로 판정한다.
+   자소서로 증명하는 대상이 아닌 지원 조건(병역, 학위·졸업, 어학 점수, 자격증 보유, 보훈·장애 우대, 출장·근무지 결격)은 '해당 없음'으로 둔다
 2) 공고·회사 정보 자료에 없는 회사 정보를 사실처럼 썼는가
 3) 자격요건(전공·학위·자격증 등)과 맞지 않는 부분을 어떻게 다뤘는가
 공고 항목 판정은 최상위 "requirements"에 넣는다."""),
 ]
 
-JD_EXTRA = ', "requirements": [{"kind": "담당업무|자격요건|우대사항", "item": "공고 문구 요약", "status": "충족|부분|없음", "where": "Q2 \\"인용\\" 또는 빈칸", "note": "한 줄"}]'
+JD_EXTRA = ', "requirements": [{"kind": "담당업무|자격요건|우대사항", "item": "공고 문구 요약", "status": "충족|부분|없음|해당 없음", "where": "Q2 \\"인용\\" 또는 빈칸", "note": "한 줄"}]'
 
 DETECTOR = """너는 'AI가 쓴 자기소개서'를 걸러 내는 채용 담당자다. 사람이 직접 쓴 글인지, 생성형 AI 글을 그대로 낸 것인지만 본다. 내용의 좋고 나쁨은 보지 않는다.
 AI 글의 흔한 특징:
@@ -168,7 +169,7 @@ def decision(summary: dict, panel: dict) -> dict:
                 fails.append(f"{name} Q{x.get('id')}")
     avgs = [v["avg"] for v in summary.values() if v["avg"] is not None]
     ais = [v["ai"] for v in summary.values() if v["ai"] is not None]
-    reqs = (panel.get("jd") or {}).get("requirements") or []
+    reqs = [r for r in ((panel.get("jd") or {}).get("requirements") or []) if not str(r.get("status", "")).startswith("해당")]
     miss = [r for r in reqs if str(r.get("status", "")).startswith("없음")]
     if fails:
         label = "탈락 위험"

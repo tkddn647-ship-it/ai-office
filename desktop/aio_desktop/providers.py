@@ -375,8 +375,15 @@ def _chat(provider: str, model: str, key: str, system: str, user: str,
             content = [{"type": "image" if f["mime"] in IMAGE_TYPES else "document",
                         "source": {"type": "base64", "media_type": f["mime"], "data": f["data"]}} for f in files] + [{"type": "text", "text": user}]
         body = {"model": model, "max_tokens": 16000, "system": system, "messages": [{"role": "user", "content": content}]}
-        d = _post("https://api.anthropic.com/v1/messages",
-                  {"x-api-key": key, "anthropic-version": "2023-06-01"}, body, timeout)
+        for mt in (16000, 8192, 4096):     # 작은 모델은 출력 한도가 낮다
+            body["max_tokens"] = mt
+            try:
+                d = _post("https://api.anthropic.com/v1/messages",
+                          {"x-api-key": key, "anthropic-version": "2023-06-01"}, body, timeout)
+                break
+            except ProviderError as e:
+                if "max_tokens" not in str(e) or mt == 4096:
+                    raise
         text = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
         u = d.get("usage", {})
         return text, {"in": u.get("input_tokens", 0), "out": u.get("output_tokens", 0)}

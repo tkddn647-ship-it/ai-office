@@ -166,3 +166,44 @@ def set_key(prov: str, value: str):
         d.pop(prov, None)
     p = app_dir() / "keys.json"
     p.write_text(json.dumps(d), encoding="utf-8")
+
+
+# ---------- 역할이 쓸 회사가 준비 안 됐을 때 ----------
+API_PROVIDERS = ("openai", "anthropic", "gemini")
+
+
+def ready_providers(keys: dict) -> list[str]:
+    """지금 쓸 수 있는 회사. API 회사는 키가 있을 때, Claude Code·Cursor는 이 PC에 CLI가 있을 때."""
+    from . import providers
+    out = [p for p in API_PROVIDERS if keys.get(p)]
+    if keys.get("claudecode") or providers.find_claude_cli():
+        out.append("claudecode")
+    if providers.find_cursor_cli():
+        out.append("cursor")
+    return out
+
+
+def effective_roles(cfg: dict, keys: dict, need_files: tuple[str, ...] = ("reader",)) -> tuple[dict, list[str]]:
+    """키가 없는 회사로 잡힌 역할을 준비된 회사로 바꾼 설정 사본과 바꾼 내용.
+    처음 쓰는 사람이 키 하나만 넣어도 모든 역할이 돌게 한다. (Cursor는 사진·PDF를 못 읽어 reader에는 쓰지 않음)"""
+    import copy
+    cfg = copy.deepcopy(cfg)
+    ready = ready_providers(keys)
+    notes = []
+    if not ready:
+        return cfg, notes
+    used = [v.get("provider") for v in cfg["roles"].values() if v.get("provider") in ready]
+    pref = max(set(used), key=used.count) if used else ready[0]
+    for r, v in cfg["roles"].items():
+        prov = v.get("provider")
+        if prov == "mock" or prov in ready and not (r in need_files and prov == "cursor"):
+            continue
+        cands = [pref] + [p for p in ready if p != pref]
+        if r in need_files:
+            cands = [p for p in cands if p != "cursor"]
+        if not cands:
+            continue
+        new = cands[0]
+        notes.append(f"{r}: {prov} → {new}")
+        cfg["roles"][r] = {"provider": new, "model": (cfg.get("models") or {}).get(new, "")}
+    return cfg, notes

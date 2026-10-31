@@ -33,13 +33,14 @@ DEFAULT = {
         "advisor": {"provider": "openai", "model": PROVIDERS["openai"]["default_model"]},
         "writer": {"provider": "anthropic", "model": PROVIDERS["anthropic"]["default_model"]},
         "judge": {"provider": "openai", "model": PROVIDERS["openai"]["default_model"]},
+        "reader": {"provider": "gemini", "model": PROVIDERS["gemini"]["default_model"]},   # 사진·PDF 읽기
     },
     # 화면 입력을 다음 실행에도 남겨 둔다 (포트가 매번 바뀌어 브라우저 저장소를 못 쓰므로)
     "security": {"exposed": True, "data_level": 1},
     # GitHub 버전에서 경험·지원서 가져오기. kind: github | zip | folder.  auto: 켤 때마다 GitHub에서 최신본 가져오기
     "sync": {"kind": "github", "value": "", "branch": "main", "auto": False},
     # 다음에 켤 때 그대로 열리게: 마지막 탭, 마지막 지원서, 마지막 경험
-    "ui": {"mode": "jaso", "sub": "exp", "app": "", "exp": ""},
+    "ui": {"mode": "jaso", "sub": "exp", "app": "", "exp": "", "onboarded": False},
     "data_dir": "",   # 자소서 자료 폴더. 비우면 문서\AIOffice자소서
 }
 

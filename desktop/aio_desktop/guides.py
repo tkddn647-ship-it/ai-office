@@ -105,7 +105,7 @@ class Guides:
 
     def plan(self, questions: list[dict], defense: bool) -> dict:
         """문항마다 유형과 읽을 절. 반환 {"per_q": {id: {"type", "type_name", "sections": [label]}}, "text": 프롬프트에 넣을 가이드 본문}"""
-        if not self.ok():
+        if not self.ok():   # 가이드 파일이 없음
             return {"per_q": {q["id"]: {"type": qtype(q), "type_name": QTYPE_NAME[qtype(q)], "sections": []} for q in questions},
                     "text": "", "known": False}
         used: list[dict] = []
@@ -127,10 +127,34 @@ class Guides:
             secs = add(SECTION_MAP[t])
             per[q["id"]] = {"type": t, "type_name": QTYPE_NAME[t], "sections": [self.label(s) for s in secs + dsec + common]}
         known = bool(used)
-        if not known:   # G1/G2 형식이 아닌 사용자 가이드: 통째로 (앞부분만)
-            text = "\n\n".join(f"=== {n} ===\n{t}" for n, t in self.files.items())[:20000]
-        else:
-            text = "\n".join(f"〔{self.label(s)}〕\n{s['text'].strip()}\n" for s in used)
+        text = "\n".join(f"〔{self.label(s)}〕\n{s['text'].strip()}\n" for s in used)
+        # 사용자가 앱에서 넣은 가이드 (G1·G2 형식이 아닌 것): '문항별: 유형' 절은 그 유형 문항에만, 나머지 절은 모든 문항에
+        mapped = {short for keys in SECTION_MAP.values() for short, _ in keys}
+        own = [s for s in self.sections if s["short"] not in mapped or not known]
+        if own:
+            types = {v["type"] for v in per.values()}
+            pats = {k: p for k, _, p in QTYPES if k != "experience"}
+            picked = []
+            for s in own:
+                h = s["heading"]
+                if h.startswith("문항별"):
+                    hit = [t for t in types if t != "experience" and re.search(pats[t], h)]
+                    exp_like = "experience" in types and not any(re.search(p, h) for p in pats.values())
+                    if not hit and not exp_like:
+                        continue
+                    for qid, v in per.items():
+                        if v["type"] in hit or (exp_like and v["type"] == "experience"):
+                            v["sections"].append(self.label(s))
+                else:
+                    for v in per.values():
+                        v["sections"].append(self.label(s))
+                picked.append(s)
+            # 같은 절 이름이 여러 번 붙지 않게
+            for v in per.values():
+                v["sections"] = list(dict.fromkeys(v["sections"]))
+            text += "\n".join(f"〔{self.label(s)}〕\n{s['text'].strip()}\n" for s in picked)
+        text = text[:30000]
+        known = known or bool(own)
         return {"per_q": per, "text": text, "known": known}
 
     # ---------- 베끼기 검사 ----------

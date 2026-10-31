@@ -54,6 +54,24 @@ table.t th{background:#f2f4f8}
 details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--accent)}
 .ans{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0;background:#fcfcfd}
 .only{display:none}
+.dz-box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0 12px;background:#fafbfd}
+.dz{border:2px dashed #c6d2ea;border-radius:10px;padding:14px;text-align:center;color:var(--sub);font-size:13px;cursor:pointer;margin-top:6px;background:#fff}
+.dz.over{border-color:var(--accent);background:#eef3ff}
+.dz-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.dz-file{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;font-size:12px;background:#fff}
+.dz-file img{width:38px;height:38px;object-fit:cover;border-radius:4px}
+.checklist{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.ck{font-size:12px;border-radius:14px;padding:4px 10px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer}
+.ck.done{background:#e8f6ee;border-color:#bfe3cc}.ck.todo{background:#fff5df;border-color:#f1e2a8}
+.sub button.minor{background:transparent;color:var(--sub);text-decoration:underline}
+#s_gd{display:none}
+#wiz{position:fixed;inset:0;background:rgba(15,20,30,.45);display:none;align-items:center;justify-content:center;z-index:20}
+#wiz .card{background:#fff;border-radius:14px;width:min(640px,92vw);max-height:88vh;overflow:auto;padding:22px 24px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+#wiz h3{margin:0 0 4px;font-size:18px} .wsteps{font-size:12px;color:var(--sub);margin-bottom:12px}
+.pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.pick button{background:#fff;color:var(--ink);border:1px solid var(--line);text-align:left;white-space:normal;padding:10px;line-height:1.4}
+.pick button.on{border-color:var(--accent);background:#eef3ff}
+.wbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 #s_imp,#s_exp,#s_app{display:none}
 #work{flex:1;display:flex;min-height:0}
 #jview{width:58%;max-width:820px;overflow:auto;padding:14px 18px;border-right:1px solid var(--line);background:var(--panel)}
@@ -100,7 +118,7 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
     <div><label>AI 호출</label><input id="max_calls" type="number" min="3" max="40"></div>
   </div></div>
   <div style="margin-top:14px"><button onclick="save()">설정 저장</button> <span id="saved" class="hint"></span></div>
-  <div style="margin-top:22px"><button class="ghost" onclick="quitApp()">프로그램 종료</button>
+  <div style="margin-top:22px"><button class="ghost" onclick="wizOpen()">처음 설정 안내</button> <button class="ghost" onclick="quitApp()">프로그램 종료</button>
     <div class="hint">창을 닫아도 종료됩니다. AI 작업이 돌고 있으면 끝난 뒤에 종료합니다.</div></div>
 </aside>
 
@@ -113,7 +131,8 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
   <div id="status">대기 중</div>
   <div id="work">
   <div id="jview" class="only" data-for="jaso">
-    <div class="sub"><button data-s="imp" onclick="jsub('imp')">⓪ 가져오기</button><button data-s="exp" onclick="jsub('exp')">① 내 경험·활동</button><button data-s="app" onclick="jsub('app')">② 지원서 · 자소서</button></div>
+    <div id="checklist" class="checklist"></div>
+    <div class="sub"><button data-s="exp" onclick="jsub('exp')">① 내 경험·활동</button><button data-s="gd" onclick="jsub('gd')">② 작성 가이드</button><button data-s="app" onclick="jsub('app')">③ 지원서 · 자소서</button><button data-s="imp" onclick="jsub('imp')" class="minor">GitHub에서 가져오기</button></div>
 
     <section id="s_imp">
       <div class="hint">GitHub 버전(for_office)에 정리해 둔 <b>experiences/</b> 경험 기록과 <b>applications/·jd/·final/</b> 지원서를 그대로 가져옵니다. 따로 다시 정리할 필요 없습니다.
@@ -139,20 +158,33 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
 
     <section id="s_exp">
       <div class="hint">자소서는 여기 적은 경험만 근거로 씁니다. 적지 않은 수치·역할은 AI가 지어내지 않고 [확인 필요]로 남깁니다. 시뮬레이션과 실측은 꼭 구분해 적으세요.</div>
+      <div class="dz-box"><b>자료로 경험 만들기</b> <span class="hint">보고서·발표 자료·포트폴리오 PDF, 상장·사진, 메모를 넣으면 AI가 아래 양식으로 정리합니다.</span>
+        <div id="dz_exp"></div></div>
       <div id="explist" class="chips"></div>
       <label>제목</label><input id="e_title" placeholder="예: 로켓 엔진 추력 측정과 노즐 설계">
       <label>내용 <span class="hint" id="e_info"></span></label>
       <textarea id="e_body" style="height:340px;font-family:Consolas,'Malgun Gothic',monospace;font-size:12.5px"></textarea>
       <div class="row" style="margin-top:6px;flex-wrap:wrap"><button onclick="expSave()" style="flex:none">저장</button><button class="ghost" onclick="expNew()" style="flex:none">새로 쓰기</button><button class="bad" onclick="expDel()" style="flex:none">삭제</button></div>
-      <details style="margin-top:12px"><summary>메모만 적고 AI로 양식 채우기</summary>
-        <div class="hint">생각나는 대로 적으면 AI가 위 양식으로 정리해 내용 칸에 넣습니다. 저장은 하지 않습니다. 빈 곳은 [확인 필요]로 남으니 읽고 고친 뒤 저장하세요.</div>
-        <textarea id="e_notes" style="height:110px" placeholder="예: 2025년 학회 로켓팀. 연료는 팀이 만들고 로드셀로 추력 측정, 그 값으로 다시 시뮬 돌려서 노즐 설계..."></textarea>
-        <button class="ghost" onclick="expOrganize()" style="margin-top:6px">AI로 양식 채우기</button>
-      </details>
+    </section>
+
+    <section id="s_gd">
+      <div class="hint">작성 가이드는 '어떻게 쓰는지'의 기준입니다 (취업 특강, 책, 학교 취업센터 자료 등). 작성 AI와 심사관이 문항 유형에 맞는 부분을 골라 씁니다.
+        경험·수치·회사 정보의 근거로는 쓰지 않습니다. 가이드에 나온 예시 문장은 베끼기 검사에만 씁니다.</div>
+      <div id="gdlist" class="chips"></div>
+      <div class="dz-box"><b>가이드 넣기</b> <span class="hint">강의 슬라이드 사진·PDF나 글을 넣으면 AI가 절 단위로 정리하고, 예시 문장은 따로 모읍니다.</span>
+        <div id="dz_gd"></div></div>
+      <div class="row"><div><label>가이드 이름</label><input id="gd_name" placeholder="예: 학교 취업센터 자소서 특강"></div></div>
+      <label>정리본 <span class="hint" id="gd_info"></span></label>
+      <textarea id="gd_body" style="height:300px;font-family:Consolas,'Malgun Gothic',monospace;font-size:12.5px" placeholder="## 1. 두괄식 [p.3]&#10;- 첫 문장에 결과 숫자&#10;&#10;## 문항별: 지원동기 [p.10]&#10;- 공고를 내 말로 다시 풀기"></textarea>
+      <details><summary>예시 문장 (베끼기 검사용, AI에 보내지 않음)</summary><textarea id="gd_ex" style="height:110px"></textarea></details>
+      <div class="row" style="margin-top:6px"><button onclick="gdSave()" style="flex:none">저장</button><button class="ghost" onclick="gdNew()" style="flex:none">새로 쓰기</button><button class="bad" onclick="gdDel()" style="flex:none">삭제</button></div>
+      <div class="hint">'## 문항별: 지원동기'처럼 제목에 문항 유형을 넣으면 그 유형 문항에만 적용되고, 나머지 절은 모든 문항에 적용됩니다.</div>
     </section>
 
     <section id="s_app">
       <div class="row"><select id="applist" onchange="appLoad(this.value)"></select><button class="ghost" style="flex:none" onclick="appNew()">새 지원서</button></div>
+      <div class="dz-box"><b>공고 넣기</b> <span class="hint">채용 공고 캡처·PDF와 자소서 문항 화면 캡처를 넣으면 회사·직무·마감·공고 원문·문항·글자수를 채웁니다. 공고 원문은 글자 그대로 옮깁니다.</span>
+        <div id="dz_jd"></div></div>
       <div class="row"><div><label>회사</label><input id="a_company"></div><div><label>직무</label><input id="a_role"></div><div style="flex:.6"><label>마감</label><input id="a_deadline" placeholder="2026-11-04"></div></div>
       <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="a_defense" style="width:auto"> 방산 기업 (신뢰성·예외 처리·규격 중심으로 씀)</label>
       <label>회사 공고 원문 (담당업무·자격요건·우대사항 그대로 붙여 넣기)</label><textarea id="a_jd" style="height:120px"></textarea>
@@ -201,6 +233,7 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
   </div>
 </main>
 <div id="diffbox" onclick="this.style.display='none'"></div>
+<div id="wiz"><div class="card" id="wizcard"></div></div>
 
 <script>
 // 토큰은 주소의 # 뒤에서 읽고(서버로 보내지지 않음) 이 탭에만 보관한다. 주소창에서는 지운다.
@@ -208,13 +241,13 @@ const TOKEN=(()=>{ const m=location.hash.match(/t=([\w-]+)/); let t=m?m[1]:"";
   try{ if(t) sessionStorage.setItem("aio_t",t); else t=sessionStorage.getItem("aio_t")||""; }catch(e){}
   if(m) history.replaceState(null,"",location.pathname); return t; })();
 const ROLES={planner:["팀장 · 기획","code"],builder:["개발 · 구현","code"],reviewer:["리뷰","code"],
-  advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["서류 심사관 5명 · AI 판별관","jaso"]};
+  advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["서류 심사관 5명 · AI 판별관","jaso"],reader:["사진·PDF 읽기","jaso"]};
 const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️",scanner:"🛰️",advisor:"🛡️",writer:"✍️",judge:"⚖️",detector:"🤖"};
 const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템",scanner:"스캐너",advisor:"조치안",writer:"작성",judge:"서류 심사",detector:"AI 작성 확인"};
 const JNAME={hr:"인사담당",lead:"현업 팀장",interview:"면접관",rival:"경쟁 지원자",jd:"공고 대조"};
 const EMPTY={code:'왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한 뒤 아래에 할 일을 적어 주세요.<br>예: "README에 설치 방법 섹션을 추가하고, 오타를 고쳐 줘"<br><br>바뀐 내용은 \'변경 보기\'로 확인하고, 승인하면 git 저장소일 경우 새 브랜치에 커밋됩니다. 버리면 원래대로 돌아갑니다.',
   security:"작업 폴더를 고르고 노출 여부·데이터 등급을 정한 뒤 시작을 누르세요. 결과 표가 여기에 나옵니다.",
-  jaso:"① 내 경험·활동을 적어 저장하고, ② 지원서에 회사 공고와 자소서 항목을 넣은 뒤 'AI로 작성 + 심사'를 누르세요.<br>진행 상황과 심사 점수가 여기에 나옵니다. API 키는 왼쪽 아래에서 넣습니다."};
+  jaso:"① 내 경험·활동: 보고서·PDF·사진·메모를 넣어 경험을 만들고<br>② 작성 가이드: 취업 특강 자료가 있으면 넣고 (선택)<br>③ 지원서: 공고·문항 캡처를 넣은 뒤 'AI로 작성 + 심사'를 누르세요.<br><br>진행 상황과 심사 점수가 여기에 나옵니다. 처음이면 왼쪽 아래 '처음 설정 안내'를 누르세요."};
 let PROV={}, since=0, timer=null, MODE="code", RUNMODE="code";
 function setMode(m){ MODE=m; UI.mode=m; uiSave();
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
@@ -351,9 +384,10 @@ function aicheckView(ev){ const box=el("div"); const j=ev.detect.judge||{};
 // ---------------- 자소서 ----------------
 let LIB={experiences:[],apps:[]}, CUR_EXP=null, CUR_APP=null;
 function jsub(x){ document.querySelectorAll(".sub button").forEach(b=>b.classList.toggle("on",b.dataset.s===x));
-  ["imp","exp","app"].forEach(k=>document.getElementById("s_"+k).style.display=x===k?"block":"none"); UI.sub=x; uiSave(); }
+  ["imp","exp","app","gd"].forEach(k=>document.getElementById("s_"+k).style.display=x===k?"block":"none"); UI.sub=x; uiSave();
+  if(x==="gd") gdLoad().catch(()=>{}); }
 // ---- 다음에 켤 때 그대로 열리게 ----
-let UI={mode:"jaso",sub:"exp",app:"",exp:""}, uiTimer=null, RESTORED=false;
+let UI={mode:"jaso",sub:"exp",app:"",exp:"",onboarded:false}, uiTimer=null, RESTORED=false;
 function uiSave(){ if(!RESTORED) return; clearTimeout(uiTimer); uiTimer=setTimeout(()=>api("/api/config",{ui:UI}).catch(()=>{}),400); }
 // ---- 가져오기 ----
 function impKind(){ const k=document.getElementById("g_kind").value; document.getElementById("g_gh").style.display=k==="github"?"block":"none"; document.getElementById("g_local").style.display=k==="github"?"none":"block"; }
@@ -378,7 +412,7 @@ async function impRun(auto){
 }
 async function libLoad(keep){
   try{ LIB=await api("/api/lib"); }catch(e){ return alertBox(e.message) }
-  const gs=LIB.guides||{files:[]}; const gtxt=gs.files.length?`작성 가이드: ${gs.files.join(", ")} (절 ${gs.sections}개) · 베끼기 검사 ${gs.examples?"켜짐":"꺼짐 (examples.txt 없음)"}`:"작성 가이드 없음: 기본 규칙만 적용합니다. 가져오기에서 '작성 가이드'를 체크해 가져오세요.";
+  const gs=LIB.guides||{files:[]}; const gtxt=gs.files.length?`작성 가이드: ${gs.files.join(", ")} (절 ${gs.sections}개) · 베끼기 검사 ${gs.examples?"켜짐":"꺼짐 (examples.txt 없음)"}`:"작성 가이드 없음: 기본 규칙(두괄식, 소제목에 숫자, 근거 없는 내용 금지 등)만 적용합니다. ② 작성 가이드에서 넣을 수 있습니다.";
   document.getElementById("g_have").textContent=gtxt; document.getElementById("a_guides").textContent=gtxt;
   const L=document.getElementById("explist"); L.innerHTML="";
   LIB.experiences.forEach(x=>L.append(el("button",{className:"chip"+(x.id===CUR_EXP?" on":""),textContent:`${x.id} ${x.title}`+(x.unconfirmed?` · 확인 필요 ${x.unconfirmed}`:""),dataset:{id:x.id},onclick:()=>expOpen(x.id)})));
@@ -405,7 +439,7 @@ async function expOpen(id){ const j=await api("/api/exp?id="+encodeURIComponent(
   document.getElementById("e_body").value=lines.slice(1).join("\n").replace(/^\n+/,""); document.getElementById("e_info").textContent=id+" 수정 중"; markExp(); }
 async function expSave(){ const t=document.getElementById("e_title").value.trim(); if(!t) return alertBox("제목을 적어 주세요");
   try{ const j=await api("/api/exp/save",{id:CUR_EXP,title:t,body:document.getElementById("e_body").value}); CUR_EXP=j.id;
-    await libLoad(true); renderExpPick(); markExp(); document.getElementById("e_info").textContent=j.id+" 저장했습니다"; }catch(e){ alertBox(e.message) } }
+    await libLoad(true); renderExpPick(); markExp(); document.getElementById("e_info").textContent=j.id+" 저장했습니다"; refreshChecklist(); }catch(e){ alertBox(e.message) } }
 async function expDel(){ if(!CUR_EXP) return; if(!window.confirm(CUR_EXP+"를 지울까요? 자료 폴더의 _지운것 폴더로 옮깁니다.")) return;
   try{ await api("/api/exp/delete",{id:CUR_EXP}); expNew(); await libLoad(true); renderExpPick(); }catch(e){ alertBox(e.message) } }
 async function expOrganize(){ const n=document.getElementById("e_notes").value.trim(); if(!n) return;
@@ -466,7 +500,7 @@ function appBody(){ const ans={}; document.querySelectorAll("#a_answers textarea
     jd:v("a_jd"),company_info:v("a_info"),questions:qList(),exp_ids:picked.length===LIB.experiences.length?[]:picked,
     target_ai:parseFloat(v("a_ai")||"2"),target_avg:parseFloat(v("a_avg")||"3.5"),max_rounds:parseInt(v("a_rounds")||"3"),answers:ans}; }
 async function appSave(quiet){ try{ const j=await api("/api/app/save",appBody()); CUR_APP=j.name; await libLoad(true); document.getElementById("applist").value=CUR_APP;
-    if(!quiet) render({role:"system",kind:"info",time:"",text:`${j.name} 저장했습니다.\n위치: ${LIB.dir} 안 applications/${j.name}`}); return true; }
+    refreshChecklist(); if(!quiet) render({role:"system",kind:"info",time:"",text:`${j.name} 저장했습니다.\n위치: ${LIB.dir} 안 applications/${j.name}`}); return true; }
   catch(e){ alertBox(e.message); return false } }
 async function appRun(m){ if(!(await appSave(true))) return; try{ await save(); since=0; document.getElementById("feed").innerHTML="";
   await api("/api/run",{mode:"jaso",app:CUR_APP,jaso_mode:m}); }catch(e){ alertBox(e.message) } }
@@ -520,9 +554,137 @@ async function showDiff(){
   box.style.display="block";
 }
 document.getElementById("task").addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.ctrlKey) start(); });
+// ---------------- 사진·PDF·글 넣기 ----------------
+const DZ={};
+function fmtSize(n){ return n>1048576?(n/1048576).toFixed(1)+" MB":Math.ceil(n/1024)+" KB"; }
+function b64(buf){ let s="",a=new Uint8Array(buf),c=0x8000; for(let i=0;i<a.length;i+=c) s+=String.fromCharCode.apply(null,a.subarray(i,i+c)); return btoa(s); }
+async function shrinkImage(file){   // 긴 변 2000px, JPEG 90%로 줄여 보냄 (글자는 충분히 읽히고 비용·시간은 줄어듦)
+  if(file.size<800*1024&&file.type!=="image/heic") return {name:file.name,mime:file.type,data:b64(await file.arrayBuffer()),size:file.size};
+  const img=await createImageBitmap(file); const k=Math.min(1,2000/Math.max(img.width,img.height));
+  const c=document.createElement("canvas"); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+  const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height);
+  const url=c.toDataURL("image/jpeg",0.9); const data=url.split(",")[1];
+  return {name:file.name.replace(/\.\w+$/,"")+".jpg",mime:"image/jpeg",data,size:Math.round(data.length*0.75)};
+}
+async function toPayload(file){
+  if(file.type.startsWith("image/")) return shrinkImage(file);
+  const low=file.name.toLowerCase(); let mime=file.type;
+  if(low.endsWith(".pdf")) mime="application/pdf"; else if(/\.(txt|md|csv)$/.test(low)) mime="text/plain";
+  return {name:file.name,mime,data:b64(await file.arrayBuffer()),size:file.size};
+}
+function makeDZ(id,purpose,ph,onDone){
+  const root=document.getElementById(id); const st={files:[],purpose}; DZ[purpose]=st;
+  const input=el("input",{type:"file",multiple:true,accept:"image/*,.pdf,.txt,.md,.docx,.hwp,.hwpx",style:"display:none"});
+  const zone=el("div",{className:"dz",innerHTML:"사진·PDF·문서를 끌어다 놓거나 <b>눌러서 고르기</b><br>캡처한 화면은 <b>Ctrl+V</b>로 바로 붙여 넣기"});
+  const list=el("div",{className:"dz-files"}); const ta=el("textarea",{placeholder:ph,style:"height:70px;margin-top:6px"});
+  const go=el("button",{textContent:"AI로 읽어서 채우기",style:"margin-top:6px"}); const msg=el("div",{className:"hint"});
+  const draw=()=>{ list.innerHTML=""; st.files.forEach((f,i)=>{ const it=el("div",{className:"dz-file"});
+      if(f.mime.startsWith("image/")) it.append(el("img",{src:`data:${f.mime};base64,${f.data}`}));
+      it.append(document.createTextNode(`${f.name} · ${fmtSize(f.size)}`),el("button",{className:"ghost",textContent:"×",style:"padding:0 6px",onclick:()=>{st.files.splice(i,1);draw()}}));
+      list.append(it); }); };
+  st.add=async files=>{ for(const f of files){ try{ st.files.push(await toPayload(f)); }catch(e){ msg.textContent=f.name+": "+e.message; } } draw(); };
+  zone.onclick=()=>input.click(); input.onchange=()=>{ st.add([...input.files]); input.value=""; };
+  zone.ondragover=e=>{e.preventDefault();zone.classList.add("over")}; zone.ondragleave=()=>zone.classList.remove("over");
+  zone.ondrop=e=>{e.preventDefault();zone.classList.remove("over");st.add([...e.dataTransfer.files])};
+  go.onclick=async()=>{ if(!st.files.length&&!ta.value.trim()) return msg.textContent="사진·파일을 넣거나 글을 적어 주세요";
+    go.disabled=true; msg.textContent="AI가 읽는 중… 사진이 많으면 1~2분 걸립니다";
+    try{ await save(); const r=await api("/api/read",{purpose,files:st.files.map(({name,mime,data})=>({name,mime,data})),text:ta.value});
+      msg.textContent="채웠습니다. 아래 내용을 읽고 고친 뒤 저장하세요."+(r._saved_originals?" 원본은 자료 폴더 _원본에 보관했습니다.":"");
+      st.files=[]; draw(); ta.value=""; onDone(r); }
+    catch(e){ msg.textContent="실패: "+e.message; } finally{ go.disabled=false; } };
+  root.append(input,zone,list,ta,go,msg);
+}
+document.addEventListener("paste",e=>{ if(MODE!=="jaso") return; const imgs=[...(e.clipboardData||{}).files||[]].filter(f=>f.type.startsWith("image/"));
+  if(!imgs.length) return; const sub=UI.sub; const target=sub==="exp"?DZ.exp:sub==="gd"?DZ.guide:sub==="app"?DZ.jd:null; if(!target) return;
+  e.preventDefault(); target.add(imgs.map((f,i)=>new File([f],`캡처-${Date.now()}-${i+1}.png`,{type:f.type}))); });
+
+function fillJD(r){
+  const set=(id,v)=>{ if(v!==undefined&&v!==null&&String(v).trim()) document.getElementById(id).value=v; };
+  if(CUR_APP&&!window.confirm("지금 열린 지원서에 채울까요? (취소하면 새 지원서로 채웁니다)")) appNew();
+  set("a_company",r.company); set("a_role",r.role); set("a_deadline",r.deadline); set("a_jd",r.jd_text); set("a_info",r.company_info);
+  if(r.defense) document.getElementById("a_defense").checked=true;
+  const qs=(r.questions||[]).filter(q=>q.text);
+  if(qs.length){ document.getElementById("a_qs").innerHTML="";
+    qs.forEach(q=>document.getElementById("a_qs").append(qRow({title:q.title,text:q.text,limit:q.limit||1000,count:q.count==="unknown"?"with_spaces":q.count}))); calls(); renderAnswers({}); }
+  const warn=[...(r.unreadable||[]).map(x=>"못 읽음: "+x)];
+  if(qs.some(q=>!q.limit)) warn.push("글자수 제한이 안 보이는 문항이 있어 1000자로 넣었습니다. 확인하세요.");
+  if(qs.some(q=>q.count==="unknown")) warn.push("글자수 세는 방식(공백 포함/제외)이 안 보여 '공백 포함'으로 넣었습니다. 채용 사이트에서 확인하세요.");
+  if(!qs.length) warn.push("자소서 문항이 보이지 않았습니다. 문항 화면을 캡처해 한 번 더 넣거나 직접 적어 주세요.");
+  render({role:"system",kind:"info",time:"",text:"공고를 채웠습니다. 회사·직무·마감·문항을 확인하고 '저장'을 누르세요."+(warn.length?"\n- "+warn.join("\n- "):"")}); }
+function fillExp(r){ CUR_EXP=null; markExp(); document.getElementById("e_title").value=r.title||""; document.getElementById("e_body").value=(r.body||"").replace(/^#[^\n]*\n+/,"");
+  document.getElementById("e_info").textContent="AI 초안 · 아직 저장 안 됨 · [확인 필요]를 채운 뒤 저장하세요"; }
+let GD_CUR=null, GD_EX_NEW=false;
+function fillGuide(r){ GD_CUR=null; document.getElementById("gd_name").value=r.name||""; document.getElementById("gd_body").value=r.body||"";
+  document.getElementById("gd_ex").value=r.examples||""; GD_EX_NEW=!!(r.examples||"").trim(); document.getElementById("gd_info").textContent="AI 정리본 · 아직 저장 안 됨"; }
+
+// ---------------- 작성 가이드 ----------------
+async function gdLoad(){ const j=await api("/api/guides"); const L=document.getElementById("gdlist"); L.innerHTML="";
+  j.guides.forEach(g=>L.append(el("button",{className:"chip"+(g.name===GD_CUR?" on":""),textContent:g.name.replace(/\.md$/,""),onclick:()=>gdOpen(g.name)})));
+  if(!j.guides.length) L.append(el("span",{className:"hint",textContent:"아직 가이드가 없습니다. 없어도 기본 규칙(두괄식, 소제목에 숫자, 근거 없는 내용 금지 등)으로 씁니다."})); return j.guides; }
+async function gdOpen(name){ const j=await api("/api/guide?name="+encodeURIComponent(name)); GD_CUR=name; GD_EX_NEW=false;
+  document.getElementById("gd_name").value=name.replace(/\.md$/,""); document.getElementById("gd_body").value=j.body.replace(/^#[^\n]*\n+/,"");
+  document.getElementById("gd_ex").value=""; document.getElementById("gd_info").textContent=name+" 수정 중"; gdLoad(); }
+function gdNew(){ GD_CUR=null; GD_EX_NEW=false; ["gd_name","gd_body","gd_ex"].forEach(i=>document.getElementById(i).value=""); document.getElementById("gd_info").textContent="새 가이드"; gdLoad(); }
+async function gdSave(){ const ex=document.getElementById("gd_ex").value;
+  try{ const j=await api("/api/guide/save",{name:document.getElementById("gd_name").value.trim(),body:document.getElementById("gd_body").value,examples:GD_EX_NEW||!GD_CUR?ex:""});
+    GD_CUR=j.name; GD_EX_NEW=false; document.getElementById("gd_info").textContent=j.name+" 저장했습니다"; await gdLoad(); refreshChecklist(); }catch(e){ alertBox(e.message) } }
+async function gdDel(){ if(!GD_CUR||!window.confirm(GD_CUR+"를 지울까요? 자료 폴더의 _지운것으로 옮깁니다.")) return; await api("/api/guide/delete",{name:GD_CUR}); gdNew(); refreshChecklist(); }
+
+// ---------------- 시작 체크리스트 ----------------
+let KEYS_SET={};
+async function refreshChecklist(){
+  try{ LIB=await api("/api/lib"); }catch(e){ return }
+  const c=await api("/api/config"); KEYS_SET=c.keys_set; const roles=c.config.roles;
+  const need=[...new Set(["writer","judge","reader"].map(r=>roles[r].provider))].filter(p=>p!=="mock");
+  const keyOk=need.every(p=>KEYS_SET[p]);
+  const items=[[keyOk,keyOk?"AI 키 준비됨":"AI 키 넣기",()=>wizOpen()],
+    [LIB.experiences.length>0,`경험 ${LIB.experiences.length}개`,()=>jsub("exp")],
+    [(LIB.guides||{}).files&&LIB.guides.files.length>0,`작성 가이드 ${((LIB.guides||{}).files||[]).length}개 (선택)`,()=>jsub("gd")],
+    [LIB.apps.length>0,`지원서 ${LIB.apps.length}개`,()=>jsub("app")]];
+  const box=document.getElementById("checklist"); box.innerHTML="";
+  items.forEach(([ok,t,f],i)=>box.append(el("button",{className:"ck "+(ok?"done":(i===2?"":"todo")),textContent:(ok?"✓ ":"○ ")+t,onclick:f})));
+  return {keyOk};
+}
+
+// ---------------- 처음 설정 안내 ----------------
+const WIZ={step:0,prov:"gemini"};
+const PINFO={gemini:{name:"Google Gemini",url:"https://aistudio.google.com/apikey",note:"무료 등급이 있어 부담 없이 시작하기 좋습니다. 단, 무료 등급은 Google이 입력 내용을 서비스 개선에 쓰고 사람이 검토할 수 있습니다(약관 확인 필요). 개인정보가 든 자소서는 유료 등급을 권합니다."},
+  openai:{name:"OpenAI (ChatGPT)",url:"https://platform.openai.com/api-keys",note:"ChatGPT 구독과 API는 별도 결제입니다. API 사용량만큼 청구됩니다."},
+  anthropic:{name:"Anthropic (Claude)",url:"https://console.anthropic.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다. 긴 글쓰기에 강한 편입니다."}};
+function wizOpen(){ WIZ.step=0; document.getElementById("wiz").style.display="flex"; wizDraw(); }
+function wizClose(done){ document.getElementById("wiz").style.display="none"; if(done){ UI.onboarded=true; RESTORED=true; uiSave(); } refreshChecklist(); }
+function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
+  const steps=["1. AI 고르기","2. 경험 넣기","3. 공고 넣기"]; c.append(el("div",{className:"wsteps",textContent:steps.map((t,i)=>i===WIZ.step?"● "+t:"○ "+t).join("   ")}));
+  if(WIZ.step===0){
+    c.append(el("h3",{textContent:"어떤 AI를 쓸까요?"}),el("div",{className:"hint",textContent:"하나만 고르면 작성·심사·사진 읽기에 모두 씁니다. 나중에 왼쪽 '역할별 AI'에서 역할마다 바꿀 수 있습니다."}));
+    const pick=el("div",{className:"pick"});
+    Object.entries(PINFO).forEach(([k,v])=>pick.append(el("button",{className:k===WIZ.prov?"on":"",innerHTML:`<b>${v.name}</b>`+(KEYS_SET[k]?'<br><span class="keyset">● 키 저장됨</span>':""),onclick:()=>{WIZ.prov=k;wizDraw()}})));
+    const v=PINFO[WIZ.prov]; c.append(pick,el("div",{className:"hint",textContent:v.note}));
+    const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":"API 키 붙여 넣기"}); const out=el("div",{className:"hint"});
+    c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">여기서 발급</a>`}),key,out);
+    c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"키 없이 둘러보기 (가짜 AI)",onclick:async()=>{await wizApply("mock","");WIZ.step=1;wizDraw()}}),
+      el("button",{textContent:"키 확인하고 다음",onclick:async()=>{ out.textContent="확인 중…"; try{ await wizApply(WIZ.prov,key.value.trim());
+        const r=await api("/api/keytest",{provider:WIZ.prov,model:PROV[WIZ.prov].default_model}); out.textContent="연결됐습니다."; WIZ.step=1; wizDraw(); }
+        catch(e){ out.textContent="연결 실패: "+e.message+" · 키를 다시 확인하세요."; } }})]));
+  } else if(WIZ.step===1){
+    c.append(el("h3",{textContent:"내 경험·활동을 넣어 주세요"}),el("div",{className:"hint",textContent:"자소서는 여기 넣은 경험만 근거로 씁니다. 보고서·발표 자료·포트폴리오 PDF, 상장 사진, 메모 무엇이든 됩니다. AI가 양식으로 정리하면, 빈 곳([확인 필요])을 채워 저장하세요."}));
+    c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"GitHub(for_office)에서 가져오기",onclick:()=>{wizClose(false);jsub("imp")}}),
+      el("button",{className:"ghost",textContent:"나중에",onclick:()=>{WIZ.step=2;wizDraw()}}),
+      el("button",{textContent:"자료로 경험 만들기",onclick:()=>{wizClose(true);setMode("jaso");jsub("exp");expNew()}})]));
+  } else {
+    c.append(el("h3",{textContent:"지원할 공고를 넣어 주세요"}),el("div",{className:"hint",textContent:"공고 캡처·PDF와 자소서 문항 화면 캡처를 넣으면 회사·직무·마감·문항·글자수를 채웁니다. 그다음 'AI로 작성 + 심사'를 누르면 됩니다. 작성 가이드(취업 특강 자료 등)가 있으면 ② 작성 가이드에 넣어 두세요. 없어도 기본 규칙으로 씁니다."}));
+    c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"닫기",onclick:()=>wizClose(true)}),
+      el("button",{textContent:"공고 넣으러 가기",onclick:()=>{wizClose(true);setMode("jaso");jsub("app");appNew()}})]));
+  } }
+async function wizApply(prov,key){ const roles={}; for(const r of Object.keys(ROLES)) roles[r]={provider:prov,model:PROV[prov].default_model};
+  await api("/api/config",{roles,keys:key?{[prov]:key}:{}}); await load(); }
+
 addEventListener("pagehide",()=>{ try{ navigator.sendBeacon("/api/bye", new Blob([TOKEN],{type:"text/plain"})); }catch(e){} });
 async function quitApp(){ try{ await api("/api/quit",{}); document.body.innerHTML='<div style="margin:40px;font:15px sans-serif">AI Office Desktop을 종료했습니다. 이 창을 닫아 주세요.</div>'; setTimeout(()=>window.close(),300); }catch(e){ alertBox(e.message) } }
-load(); poll(); timer=setInterval(poll,900);
+makeDZ("dz_exp","exp","또는 글로 적기: 언제, 어디서, 무엇을, 내가 맡은 일, 결과 숫자… 생각나는 대로",fillExp);
+makeDZ("dz_gd","guide","또는 강의 내용·필기를 글로 붙여 넣기",fillGuide);
+makeDZ("dz_jd","jd","또는 공고 글을 그대로 복사해 붙여 넣기 (문항·글자수도 같이)",fillJD);
+load().then(async()=>{ await refreshChecklist(); if(!UI.onboarded) wizOpen(); }); poll(); timer=setInterval(poll,900);
 </script>
 </body>
 </html>

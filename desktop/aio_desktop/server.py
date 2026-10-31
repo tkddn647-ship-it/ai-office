@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hmac
 import json
+from datetime import datetime
+from pathlib import Path
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,7 +119,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         n = int(self.headers.get("content-length") or 0)
-        if n > 5 * 1024 * 1024:
+        limit = 45 if urlparse(self.path).path == "/api/read" else 5   # 사진·PDF 올리기만 크게 (base64라 원본보다 1.33배)
+        if n > limit * 1024 * 1024:
             raise ValueError("요청이 너무 큽니다")
         if not n:
             return {}
@@ -180,6 +183,18 @@ class Handler(BaseHTTPRequestHandler):
                                         "guides": Guides(lib.root).summary()})
             if path == "/api/exp":
                 return self._send(200, {"id": q.get("id"), "body": _lib().exp_read(q.get("id", ""))})
+            if path == "/api/guides":
+                lib = _lib()
+                gd = lib.root / "guides"
+                items = [{"name": p.name, "chars": p.stat().st_size} for p in sorted(gd.glob("*.md"))] if gd.is_dir() else []
+                return self._send(200, {"guides": items})
+            if path == "/api/guide":
+                lib = _lib()
+                name = Path(q.get("name", "")).name
+                p = lib.root / "guides" / name
+                if not name.endswith(".md") or not p.is_file():
+                    return self._send(400, {"error": "없는 가이드"})
+                return self._send(200, {"name": name, "body": p.read_text(encoding="utf-8", errors="replace")})
             if path == "/api/app":
                 from .guides import Guides
                 lib = _lib()
@@ -250,6 +265,33 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/exp/delete":
                 _lib().exp_delete(b.get("id", ""))
                 return self._send(200, {"ok": True})
+            if path == "/api/read":
+                from .reader import read
+                return self._send(200, read(settings.load_config(), settings.get_keys(), _lib(), b.get("purpose", ""),
+                                            b.get("files") or [], b.get("text") or "", mock=getattr(self.server, "mock", None)))
+            if path == "/api/guide/save":
+                from .reader import save_guide
+                if not (b.get("body") or "").strip():
+                    return self._send(400, {"error": "가이드 내용이 비어 있습니다"})
+                return self._send(200, {"name": save_guide(_lib(), b.get("name", ""), b["body"], b.get("examples", ""))})
+            if path == "/api/guide/delete":
+                lib = _lib()
+                name = Path(str(b.get("name") or "")).name
+                p = lib.root / "guides" / name
+                if not name.endswith(".md") or not p.is_file():
+                    return self._send(400, {"error": "없는 가이드"})
+                trash = lib.root / "_지운것"
+                trash.mkdir(exist_ok=True)
+                p.rename(trash / f"{datetime.now():%Y%m%d-%H%M%S}-{name}")
+                return self._send(200, {"ok": True})
+            if path == "/api/keytest":
+                from . import providers as pv
+                prov, model = b.get("provider", ""), b.get("model", "")
+                if prov not in pv.PROVIDERS:
+                    return self._send(400, {"error": "모르는 AI"})
+                txt, _ = pv.chat(prov, model, settings.get_keys().get(prov, ""), "Reply with JSON only.",
+                                 'Return {"ok": true}.', mock=(lambda s, u: '{"ok": true}') if prov == "mock" else None, timeout=40)
+                return self._send(200, {"ok": True, "reply": txt[:80]})
             if path == "/api/exp/organize":
                 if not (b.get("notes") or "").strip():
                     return self._send(400, {"error": "메모를 적어 주세요"})
@@ -258,6 +300,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/app/save":
                 return self._send(200, {"name": _lib().app_save(b)})
         except LibraryError as e:
+            return self._send(400, {"error": str(e)})
+        except ValueError as e:   # 읽기 실패(ReadError 포함)·JSON 아님
             return self._send(400, {"error": str(e)})
         except Exception as e:   # noqa: BLE001  AI 호출 실패 등
             return self._send(502, {"error": f"{type(e).__name__}: {e}"})

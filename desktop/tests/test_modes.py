@@ -317,6 +317,72 @@ class GuideTest(unittest.TestCase):
             self.assertFalse(run.rounds[0]["ok"])
 
 
+class ReaderTest(unittest.TestCase):
+    def test_prepare_kinds(self):
+        import base64, io, zipfile
+        from aio_desktop import reader
+        dx = io.BytesIO()
+        with zipfile.ZipFile(dx, "w") as z:
+            z.writestr("word/document.xml", "<w:document><w:p><w:r><w:t>담당업무 &amp; 자격</w:t></w:r></w:p><w:p><w:t>둘째 줄</w:t></w:p></w:document>")
+        enc = lambda b: base64.b64encode(b).decode()
+        send, text, raw = reader.prepare([
+            {"name": "공고.png", "mime": "image/png", "data": enc(b"\x89PNG fake")},
+            {"name": "../../문항.pdf", "mime": "application/pdf", "data": enc(b"%PDF-1.4")},
+            {"name": "메모.txt", "mime": "text/plain", "data": enc("글 메모".encode())},
+            {"name": "자소서.docx", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "data": enc(dx.getvalue())}])
+        self.assertEqual([f["mime"] for f in send], ["image/png", "application/pdf"])
+        self.assertEqual(raw[1]["name"], "문항.pdf")                        # 경로는 버리고 이름만
+        self.assertIn("글 메모", text)
+        self.assertIn("담당업무 & 자격\n둘째 줄", text)
+        with self.assertRaises(reader.ReadError) as c:
+            reader.prepare([{"name": "a.hwp", "mime": "", "data": enc(b"x")}])
+        self.assertIn("PDF로 저장", str(c.exception))
+        with self.assertRaises(reader.ReadError):
+            reader.prepare([{"name": "a.exe", "mime": "application/x-msdownload", "data": enc(b"MZ")}])
+
+    def test_read_sends_files_and_keeps_originals(self):
+        import base64
+        from aio_desktop import providers, reader
+        with tempfile.TemporaryDirectory() as d:
+            lib = Library(d)
+            got = {}
+
+            def fake_chat(provider, model, key, system, user, mock=None, files=None, timeout=0, **k):
+                got.update(system=system, user=user, files=files)
+                return json.dumps({"company": "B사", "jd_text": "원문", "questions": [{"text": "지원동기", "limit": 700, "count": "without_spaces"}]}), {}
+            orig = providers.chat
+            providers.chat = fake_chat
+            try:
+                r = reader.read({"roles": ROLES}, {}, lib, "jd",
+                                [{"name": "q.jpg", "mime": "image/jpeg", "data": base64.b64encode(b"jpg").decode()}], "추가 글")
+            finally:
+                providers.chat = orig
+            self.assertIn("글자 그대로", got["system"])
+            self.assertEqual(got["files"][0]["name"], "q.jpg")
+            self.assertIn("추가 글", got["user"])
+            self.assertEqual(r["company"], "B사")
+            self.assertTrue(list(Path(r["_saved_originals"]).glob("q.jpg")))
+
+    def test_save_own_guide_and_plan(self):
+        from aio_desktop import reader
+        from aio_desktop.guides import Guides
+        with tempfile.TemporaryDirectory() as d:
+            make_repo(Path(d))                       # G1·G2도 있는 상태에서
+            lib = Library(d)
+            name = reader.save_guide(lib, "학교 특강", "## 1. 숫자로 쓰기 [p.2]\n- 결과 숫자\n\n## 문항별: 지원동기 [p.5]\n- 회사 제품 이야기\n\n## 문항별: 강점·약점\n- 사례로",
+                                     "## p.5\n저는 귀사의 비전에 깊이 공감하여 지원하게 되었으며 반드시 기여하겠습니다")
+            self.assertEqual(name, "학교-특강.md")
+            g = Guides(d)
+            p = g.plan([{"id": 1, "title": "지원동기", "text": ""}, {"id": 2, "title": "도전", "text": "도전 경험"}], False)
+            s1, s2 = p["per_q"][1]["sections"], p["per_q"][2]["sections"]
+            self.assertIn("학교-특강 문항별: 지원동기", s1)
+            self.assertNotIn("학교-특강 문항별: 지원동기", s2)
+            self.assertNotIn("학교-특강 문항별: 강점·약점", s1 + s2)
+            self.assertIn("학교-특강 1. 숫자로 쓰기", s2)               # 일반 절은 모든 문항
+            self.assertIn("G2 지원동기 (+ 입사 후 꿈·성장)", s1)         # 기존 G1·G2도 그대로
+            self.assertEqual(g.copied("[x 1]\n저는 귀사의 비전에 깊이 공감하여 지원하게 되었습니다")[0][1], "학교-특강 p.5")
+
+
 class ImportTest(unittest.TestCase):
     def test_folder_zip_tar_same_result(self):
         import io, tarfile, zipfile

@@ -45,9 +45,17 @@ def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
     raise ProviderError(f"연결 실패: {last}")
 
 
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+
+
 def chat(provider: str, model: str, key: str, system: str, user: str,
-         json_mode: bool = True, timeout: int = 180, mock=None) -> tuple[str, dict]:
-    """한 번 묻고 답을 받는다. 반환: (텍스트, 사용량 dict)."""
+         json_mode: bool = True, timeout: int = 180, mock=None, files: list[dict] | None = None) -> tuple[str, dict]:
+    """한 번 묻고 답을 받는다. 반환: (텍스트, 사용량 dict).
+    files: [{"name", "mime", "data"(base64)}] — 사진(png·jpg·webp·gif)과 PDF. 세 회사 모두 사진·PDF를 직접 읽는다."""
+    files = files or []
+    for f in files:
+        if f["mime"] not in IMAGE_TYPES + ("application/pdf",):
+            raise ProviderError(f"{f.get('name')}: 사진(png·jpg·webp)과 PDF만 AI에 보낼 수 있습니다")
     model = model or PROVIDERS.get(provider, {}).get("default_model", "")
     if provider == "mock":
         return (mock or demo_mock)(system, user), {"in": len(user), "out": 0}
@@ -55,7 +63,13 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
         raise ProviderError(f"{PROVIDERS.get(provider, {}).get('label', provider)} API 키가 비어 있습니다. 설정에서 넣어 주세요.")
 
     if provider == "openai":
-        body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        content = user
+        if files:
+            content = [{"type": "text", "text": user}] + [
+                {"type": "image_url", "image_url": {"url": f"data:{f['mime']};base64,{f['data']}"}} if f["mime"] in IMAGE_TYPES else
+                {"type": "file", "file": {"filename": f.get("name") or "file.pdf", "file_data": f"data:application/pdf;base64,{f['data']}"}}
+                for f in files]
+        body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         d = _post("https://api.openai.com/v1/chat/completions", {"authorization": f"Bearer {key}"}, body, timeout)
@@ -64,7 +78,11 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
         return text, {"in": u.get("prompt_tokens", 0), "out": u.get("completion_tokens", 0)}
 
     if provider == "anthropic":
-        body = {"model": model, "max_tokens": 16000, "system": system, "messages": [{"role": "user", "content": user}]}
+        content = user
+        if files:
+            content = [{"type": "image" if f["mime"] in IMAGE_TYPES else "document",
+                        "source": {"type": "base64", "media_type": f["mime"], "data": f["data"]}} for f in files] + [{"type": "text", "text": user}]
+        body = {"model": model, "max_tokens": 16000, "system": system, "messages": [{"role": "user", "content": content}]}
         d = _post("https://api.anthropic.com/v1/messages",
                   {"x-api-key": key, "anthropic-version": "2023-06-01"}, body, timeout)
         text = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
@@ -73,7 +91,8 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
 
     if provider == "gemini":
         body = {"systemInstruction": {"parts": [{"text": system}]},
-                "contents": [{"role": "user", "parts": [{"text": user}]}]}
+                "contents": [{"role": "user", "parts": [{"text": user}] + [
+                    {"inline_data": {"mime_type": f["mime"], "data": f["data"]}} for f in files]}]}
         if json_mode:
             body["generationConfig"] = {"responseMimeType": "application/json"}
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -94,6 +113,15 @@ def demo_mock(system: str, user: str) -> str:
         items = [{"key": x.get("key"), "why": "가짜 AI 설명입니다.", "action": f"{x.get('fixed') or '고쳐진 버전'}으로 올리기",
                   "ticket": f"[보안] {x.get('package')} 업그레이드"} for x in json.loads(user)]
         return json.dumps({"items": items}, ensure_ascii=False)
+    if "자료를 읽어 옮기는" in system:
+        if "공고" in system and "questions" in system:
+            return json.dumps({"company": "데모회사", "role": "SW 개발", "deadline": "2026-11-30", "defense": False,
+                               "jd_text": "[데모] 담당업무: 임베디드 SW 개발\n자격요건: 관련 전공", "company_info": "",
+                               "questions": [{"title": "지원동기", "text": "지원 동기를 기술하시오.", "limit": 800, "count": "with_spaces"}],
+                               "unreadable": []}, ensure_ascii=False)
+        if "가이드" in system:
+            return json.dumps({"name": "데모 가이드", "body": "## 1. 데모 원칙 [p.1]\n- 두괄식으로 쓴다", "examples": "데모 예시 문장입니다 이것은 베끼면 안 되는 문장입니다"}, ensure_ascii=False)
+        return json.dumps({"title": "데모 경험", "body": "| 항목 | 내용 |\n|---|---|\n| 기간 | [확인 필요: 기간] |\n\n## 결과\n- [확인 필요: 수치]"}, ensure_ascii=False)
     if "경험 기록을 정리해" in system:
         return json.dumps({"title": "데모 경험", "body": "# 데모 경험\n\n| 항목 | 내용 |\n|---|---|\n| 기간 | [확인 필요: 기간] |\n\n## 문제\n- "
                            + user[:200].replace("\n", " ") + "\n\n## 결과\n- [확인 필요: 수치]\n"}, ensure_ascii=False)

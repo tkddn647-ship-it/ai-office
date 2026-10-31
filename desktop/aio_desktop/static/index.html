@@ -59,6 +59,9 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .chip{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:16px;padding:5px 10px;font-size:12.5px}
 .chip.on{border-color:var(--accent);background:#e9f0ff}
+.verdict{padding:8px 10px;border-radius:8px;margin-bottom:6px;font-size:13px}
+.verdict.ok{background:#e8f6ee}.verdict.warn{background:#fff5df}.verdict.bad{background:#fdecea}
+.susp{border-left:3px solid var(--warn);padding:4px 8px;margin:6px 0;background:#fffaf0}.susp .q2{font-weight:600}
 .cnt{font-size:12px;color:var(--sub)} .cnt.over{color:var(--bad);font-weight:700}
 </style>
 </head>
@@ -136,7 +139,8 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
       <div class="row" style="margin:10px 0;flex-wrap:wrap">
         <button onclick="appSave()" style="flex:none">저장</button>
         <button class="ok" onclick="appRun('write')" style="flex:none">AI로 작성 + 심사</button>
-        <button class="ghost" onclick="appRun('review')" style="flex:none">지금 답 심사만</button>
+        <button class="ghost" onclick="appRun('screen')" style="flex:none" title="심사관 5명이 공고 기준으로 평가, 글은 안 고침">서류 심사</button>
+        <button class="ghost" onclick="appRun('aicheck')" style="flex:none" title="AI가 쓴 글처럼 보이는 문장을 찾음, 글은 안 고침">AI 작성 확인</button>
         <button class="ghost" onclick="api('/api/stop',{})" style="flex:none">멈춤</button>
       </div>
       <div class="hint">작성·심사를 누르면 공고·항목·고른 경험이 고른 AI 회사로 전송됩니다. 무료 요금제는 입력이 검토·학습에 쓰일 수 있으니 주민번호·연락처는 경험에 적지 마세요. 심사 점수는 같은 글도 회차마다 ±1 정도 흔들립니다.</div>
@@ -173,9 +177,9 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
 <script>
 const TOKEN="__TOKEN__";
 const ROLES={planner:["팀장 · 기획","code"],builder:["개발 · 구현","code"],reviewer:["리뷰","code"],
-  advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["심사관 5명","jaso"]};
-const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️",scanner:"🛰️",advisor:"🛡️",writer:"✍️",judge:"⚖️"};
-const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템",scanner:"스캐너",advisor:"조치안",writer:"작성",judge:"심사"};
+  advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["서류 심사관 5명 · AI 판별관","jaso"]};
+const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️",scanner:"🛰️",advisor:"🛡️",writer:"✍️",judge:"⚖️",detector:"🤖"};
+const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템",scanner:"스캐너",advisor:"조치안",writer:"작성",judge:"서류 심사",detector:"AI 작성 확인"};
 const JNAME={hr:"인사담당",lead:"현업 팀장",interview:"면접관",rival:"경쟁 지원자",jd:"공고 대조"};
 const EMPTY={code:'왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한 뒤 아래에 할 일을 적어 주세요.<br>예: "README에 설치 방법 섹션을 추가하고, 오타를 고쳐 줘"<br><br>바뀐 내용은 \'변경 보기\'로 확인하고, 승인하면 git 저장소일 경우 새 브랜치에 커밋됩니다. 버리면 원래대로 돌아갑니다.',
   security:"작업 폴더를 고르고 노출 여부·데이터 등급을 정한 뒤 시작을 누르세요. 결과 표가 여기에 나옵니다.",
@@ -245,6 +249,7 @@ function render(ev){
     bub.append(el("div",{className:"files",textContent:u})); }
   if(ev.kind==="report") bub.append(reportView(ev.report));
   if(ev.kind==="scores") bub.append(scoresView(ev));
+  if(ev.kind==="aicheck") bub.append(aicheckView(ev));
   if(ev.kind==="final") bub.append(finalView(ev));
   feed.append(el("div",{className:cls},[el("div",{className:"av",textContent:ICON[ev.role]||"•"}),bub]));
   feed.scrollTop=feed.scrollHeight;
@@ -263,19 +268,49 @@ function reportView(r){ const box=el("div");
 async function handoff(){ try{ const j=await api("/api/fix_task",{}); if(!j.task) return alertBox("올릴 버전이 확인된 긴급·우선 항목이 없습니다");
   setMode("code"); document.getElementById("task").value=j.task; render({role:"system",kind:"info",time:"",text:"요청을 아래 칸에 넣었습니다. 읽어 보고 시작을 누르세요. 승인 전 diff를 꼭 확인하세요."}); }catch(e){ alertBox(e.message) } }
 function scoresView(ev){ const box=el("div");
-  const tb=el("table",{className:"t"}); tb.append(el("tr",{},["문항","글자수","심사 평균","최저","AI 의심"].map(h=>el("th",{textContent:h}))));
+  const d=ev.decision;
+  if(d){ const col=d.label==="통과 가능"?"ok":d.label==="보류"?"warn":"bad";
+    box.append(el("div",{className:"verdict "+col},[el("b",{textContent:"서류 판정: "+d.label}),
+      document.createTextNode(`  ·  공고 항목 ${d.req_met}/${d.req_total} 충족  ·  가장 낮은 문항 평균 ${d.min_avg??"-"}  ·  AI 의심 최고 ${d.max_ai??"-"}`)]));
+    if(d.fails.length) box.append(el("div",{className:"bad-t files",textContent:"탈락 표: "+d.fails.join(", ")}));
+    if(d.req_missing.length) box.append(el("div",{className:"warn-t files",textContent:"자소서에 근거가 없는 공고 항목: "+d.req_missing.join(" / ")})); }
+  const tb=el("table",{className:"t"}); tb.append(el("tr",{},["문항","글자수","심사 평균","최저","AI 의심 (면접관 / 판별관)"].map(h=>el("th",{textContent:h}))));
   ev.questions.forEach(q=>{ const s=ev.summary[q.id]||{}, m=(ev.mech.per_q||{})[q.id]||{};
-    tb.append(el("tr",{},[td("Q"+q.id),td(`${m.chars??"?"}/${q.limit}`,m.chars>q.limit?"bad-t":""),td(s.avg),td(s.min),td(s.ai,s.ai==null?"warn-t":s.ai<=2?"ok-t":"bad-t")])) });
+    const aiTxt=(s.ai_interview??"-")+" / "+(s.ai_detector??"-");
+    tb.append(el("tr",{},[td("Q"+q.id),td(`${m.chars??"?"}/${q.limit}`,m.chars>q.limit?"bad-t":""),td(s.avg),td(s.min),td(aiTxt,s.ai==null?"warn-t":s.ai<=2?"ok-t":"bad-t")])) });
   box.append(tb);
   if(ev.mech.errors.length) box.append(el("div",{className:"bad-t files",textContent:"규칙 오류: "+ev.mech.errors.join(" / ")}));
   if(ev.mech.warnings.length) box.append(el("div",{className:"warn-t files",textContent:"주의: "+ev.mech.warnings.join(" / ")}));
+  const reqs=((ev.panel||{}).jd||{}).requirements||[];
+  if(reqs.length){ const rd=el("details",{open:true}); rd.append(el("summary",{textContent:"공고 항목별 충족 여부"}));
+    const rt=el("table",{className:"t"}); rt.append(el("tr",{},["구분","공고 항목","판정","자소서 근거","메모"].map(h=>el("th",{textContent:h}))));
+    reqs.forEach(r=>{ const st=String(r.status||""); rt.append(el("tr",{},[td(r.kind),td(r.item),td(st,st.startsWith("충족")?"ok-t":st.startsWith("부분")?"warn-t":"bad-t"),td(r.where),td(r.note)])) });
+    rd.append(rt); box.append(rd); }
   const det=el("details"); det.append(el("summary",{textContent:"심사관별 지적 보기"}));
   for(const [k,v] of Object.entries(ev.panel||{})){
     if(v.error){ det.append(el("div",{className:"bad-t",textContent:`${JNAME[k]}: 실패 · ${v.error}`})); continue }
     det.append(el("div",{style:"font-weight:700;margin-top:6px",textContent:`${JNAME[k]} — ${v.overall||""}`}));
     (v.questions||[]).forEach(x=>det.append(el("div",{textContent:`Q${x.id} ${x.verdict||""} ${x.score??""}점${x.ai!=null?" · AI "+x.ai:""}\n`+[...(x.points||[]),...(x.ai_points||[])].map(p=>" - "+p).join("\n")+(x.fix?"\n → "+x.fix:"")})));
   }
-  box.append(det); return box; }
+  box.append(det);
+  box.append(el("div",{className:"files",textContent:"AI 심사관의 의견일 뿐 실제 합격 여부와 무관합니다. 지적이 경험 기록과 맞는지 직접 확인하세요."}));
+  return box; }
+function aicheckView(ev){ const box=el("div"); const j=ev.detect.judge||{};
+  if(j.error) box.append(el("div",{className:"bad-t",textContent:"AI 판별관 실패: "+j.error+" · 규칙 신호만 보여 드립니다."}));
+  const tb=el("table",{className:"t"}); tb.append(el("tr",{},["문항","판별관 AI 점수","판정","규칙 신호"].map(h=>el("th",{textContent:h}))));
+  ev.questions.forEach(q=>{ const x=(j.questions||[]).find(y=>Number(y.id)===q.id)||{}; const sg=(ev.detect.signals||{})[q.id]||{flags:[]};
+    tb.append(el("tr",{},[td("Q"+q.id),td(x.ai??"-",x.ai==null?"warn-t":x.ai<=ev.target?"ok-t":"bad-t"),td(x.verdict||""),td(sg.flags.length?sg.flags.join(" / "):"없음")])) });
+  box.append(tb);
+  ev.questions.forEach(q=>{ const x=(j.questions||[]).find(y=>Number(y.id)===q.id)||{}; const ss=x.sentences||[];
+    if(!ss.length&&!(x.human||[]).length) return;
+    const dd=el("details",{open:ss.length>0}); dd.append(el("summary",{textContent:`Q${q.id} 의심 문장 ${ss.length}개`}));
+    ss.forEach(t=>dd.append(el("div",{className:"susp"},[el("div",{className:"q2",textContent:"“"+(t.quote||"")+"”"}),
+      el("div",{textContent:"왜: "+(t.why||"")}),el("div",{className:"ok-t",textContent:"고칠 방향: "+(t.how||"")})])));
+    if((x.human||[]).length) dd.append(el("div",{className:"files",textContent:"사람 글 같은 문장: "+x.human.map(h=>"“"+h+"”").join(" ")}));
+    box.append(dd) });
+  if(j.overall) box.append(el("div",{className:"files",textContent:j.overall}));
+  box.append(el("div",{className:"files",textContent:"규칙 신호는 프로그램이 센 숫자, 판별관 점수는 AI 의견입니다. 실제 기업의 AI 판별 도구와 결과가 다를 수 있습니다."}));
+  return box; }
 // ---------------- 자소서 ----------------
 let LIB={experiences:[],apps:[]}, CUR_EXP=null, CUR_APP=null;
 function jsub(x){ document.querySelectorAll(".sub button").forEach(b=>b.classList.toggle("on",b.dataset.s===x));
@@ -322,7 +357,7 @@ function qRow(q={}){ const box=el("div",{className:"q"});
   return box; }
 function addQ(q){ document.getElementById("a_qs").append(qRow(q)); calls(); renderAnswers({}); }
 function calls(){ const r=parseInt(document.getElementById("a_rounds").value||"3");
-  document.getElementById("a_calls").textContent=`AI 호출: 작성+심사는 최대 ${1+r*5+(r-1)}회, 심사만은 5회. 요금은 키 주인에게 청구됩니다.`; }
+  document.getElementById("a_calls").textContent=`AI 호출: 작성+심사는 최대 ${1+r*6+(r-1)}회, 서류 심사 5회, AI 작성 확인 1회. 요금은 키 주인에게 청구됩니다.`; }
 function renderExpPick(sel){ const box=document.getElementById("a_exps");
   const cur=sel||[...box.querySelectorAll(".chip.on")].map(c=>c.dataset.id); const all=!cur.length; box.innerHTML="";
   LIB.experiences.forEach(x=>{ const c=el("button",{className:"chip"+(all||cur.includes(x.id)?" on":""),textContent:x.id+" "+x.title,dataset:{id:x.id}});

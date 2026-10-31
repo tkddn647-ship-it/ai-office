@@ -134,18 +134,23 @@ class JasoTest(unittest.TestCase):
             lib.exp_save(None, "다른 것", "쓰지 않을 경험")
             name = lib.app_save({"company": "A", "role": "B", "jd": "공고", "defense": True, "exp_ids": ["EXP-01"],
                                  "questions": [{"text": "지원동기", "limit": 300}], "max_rounds": 3})
-            seen, ai_scores = [], iter([4, 4, 4, 4, 4, 1, 1, 1, 1, 1])
+            seen, det_scores = [], iter([4, 1])
 
             def mock(system, user):
                 seen.append((system, user))
                 if "자기소개서를 함께 쓰는" in system:
                     return json.dumps({"answers": [{"id": 1, "text": "[추력 12% 개선]\n측정했습니다. [EXP-01]"}]})
-                return json.dumps({"questions": [{"id": 1, "score": 4, "ai": next(ai_scores)}], "overall": ""})
+                if "AI가 쓴 자기소개서" in system:     # 1차 판별관 4점 → 수정 → 2차 1점
+                    return json.dumps({"questions": [{"id": 1, "ai": next(det_scores), "sentences": []}]})
+                return json.dumps({"questions": [{"id": 1, "score": 4, "verdict": "통과", "ai": 1}], "overall": ""})
             ev = []
             run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, ev.append, mock=mock)
             run.run()
             self.assertEqual(run.state, "waiting_approval", [e["text"] for e in ev])
-            self.assertEqual(len(run.rounds), 2)          # 1차 AI 4점 → 수정 → 2차 통과
+            self.assertEqual(len(run.rounds), 2)          # 1차 판별관 AI 4점 → 수정 → 2차 통과
+            self.assertEqual(run.rounds[0]["summary"][1]["ai"], 4)        # 면접관 1점, 판별관 4점 → 높은 쪽
+            self.assertEqual(sum("AI가 쓴 자기소개서" in x[0] for x in seen), 2)
+            self.assertIn("ai_detector", seen[7][1])                  # 판별 결과가 수정 요청에 들어감
             self.assertNotIn("쓰지 않을 경험", seen[0][1])  # 고른 경험만 보냄
             self.assertIn("방산 기업이다", seen[0][0])
             final = [e for e in ev if e["kind"] == "final"][0]["answers"]
@@ -154,22 +159,56 @@ class JasoTest(unittest.TestCase):
             self.assertEqual((Path(d) / "applications" / name / "Q1.제출용.txt").read_text(encoding="utf-8"), "[추력 12% 개선]\n측정했습니다.")
             self.assertTrue(list((Path(d) / "applications" / name / "심사기록").glob("*.json")))
 
-    def test_review_only_does_not_rewrite(self):
+    def _lib_with_answer(self, d, text="[제목 1]\n내 글 [EXP-01]"):
+        lib = Library(d)
+        lib.exp_save(None, "로켓", "기록")
+        return lib, lib.app_save({"company": "A", "jd": "담당업무: 개발", "questions": [{"text": "q", "limit": 300}], "answers": {"1": text}})
+
+    def test_screen_only_does_not_rewrite(self):
         with tempfile.TemporaryDirectory() as d:
-            lib = Library(d)
-            lib.exp_save(None, "로켓", "기록")
-            name = lib.app_save({"company": "A", "questions": [{"text": "q", "limit": 300}], "answers": {"1": "[제목 1]\n내 글 [EXP-01]"}})
-            calls = []
+            lib, name = self._lib_with_answer(d)
+            calls, ev = [], []
 
             def mock(system, user):
                 calls.append(system)
-                return json.dumps({"questions": [{"id": 1, "score": 2, "ai": 4}]})
-            run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, lambda e: None, mock=mock, mode="review")
+                extra = {"requirements": [{"item": "개발", "status": "충족"}, {"item": "C++", "status": "없음"}]} if "공고 대조" in system else {}
+                return json.dumps({"questions": [{"id": 1, "score": 3, "verdict": "탈락" if "인사담당" in system else "보류", "ai": 4}], **extra})
+            run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, ev.append, mock=mock, mode="screen")
             run.run()
             self.assertEqual(run.state, "done")
-            self.assertEqual(len(calls), 5)                                 # 심사관 5명만
-            self.assertFalse(any("자기소개서를 함께 쓰는" in c for c in calls))
+            self.assertEqual(len(calls), 5)                                 # 심사관 5명만, 판별관·작성 없음
+            self.assertFalse(any("자기소개서를 함께 쓰는" in c or "AI가 쓴 자기소개서" in c for c in calls))
+            dec = [e for e in ev if e["kind"] == "scores"][0]["decision"]
+            self.assertEqual(dec["label"], "탈락 위험")
+            self.assertEqual((dec["req_total"], dec["req_met"], dec["req_missing"]), (2, 1, ["C++"]))
             self.assertIn("내 글", lib.app_read(name)["answers"]["1"])
+
+    def test_aicheck_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            lib, name = self._lib_with_answer(d)
+            calls, ev = [], []
+
+            def mock(system, user):
+                calls.append(system)
+                return json.dumps({"questions": [{"id": 1, "ai": 2, "sentences": [{"quote": "내 글", "why": "w", "how": "h"}]}]})
+            run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, ev.append, mock=mock, mode="aicheck")
+            run.run()
+            self.assertEqual(run.state, "done", [e["text"] for e in ev])
+            self.assertEqual(len(calls), 1)
+            self.assertIn("AI가 쓴 자기소개서", calls[0])
+            a = [e for e in ev if e["kind"] == "aicheck"][0]
+            self.assertEqual(a["summary"][1]["ai"], 2)
+            self.assertIn(1, a["detect"]["signals"])
+
+    def test_ai_signals(self):
+        ai_like = ("[역량 3배 성장]\n또한 다양한 경험을 통해 역량을 키웠습니다. 나아가 이를 바탕으로 가치를 만들었습니다.\n\n"
+                   "이를 통해 소통 역량과 협업 역량의 중요성을 깨달았습니다.\n\n저는 성장하는 인재가 되겠습니다.")
+        r = jaso.ai_signals(ai_like)
+        self.assertTrue(any("연결어" in f for f in r["flags"]), r)
+        self.assertTrue(any("추상 명사" in f for f in r["flags"]), r)
+        self.assertTrue(any("다짐" in f for f in r["flags"]), r)
+        human = "[추력 12% 개선]\n로드셀 값이 이상해서 밤새 배선을 다시 봤습니다. 접지가 빠져 있었고, 고친 뒤 3번 다시 쟀습니다."
+        self.assertLessEqual(jaso.ai_signals(human)["rule_score"], 1)
 
 
 class ServerModesTest(unittest.TestCase):

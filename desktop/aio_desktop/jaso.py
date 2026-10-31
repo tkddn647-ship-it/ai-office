@@ -59,18 +59,122 @@ REVISER_TAIL = """
 
 COMMON = """너는 서류 심사 패널 중 한 명이다. 아래 '너의 역할' 관점으로만 엄격하게 본다. 칭찬보다 탈락 사유를 찾는다.
 - 지적은 자소서의 실제 문장을 짧게 인용해서 한다. 자료에 없는 경험·수치를 제안하지 않는다.
+- 글자수는 아래 표의 숫자를 그대로 믿는다. 직접 세지 않는다.
 - 판단에 자신이 없으면 "확실하지 않음"이라고 쓴다.
 답은 JSON 하나만:
-{"questions": [{"id": 1, "verdict": "통과|보류|탈락", "score": 1~5, "points": ["\\"인용\\" → 문제"], "fix": "고칠 방향 한 줄"%s}], "overall": "한두 문장"}
-모든 문항에 답한다. 한국어로."""
+{"questions": [{"id": 1, "verdict": "통과|보류|탈락", "score": 1~5, "points": ["\\"인용\\" → 문제"], "fix": "고칠 방향 한 줄"%s}], "overall": "한두 문장"%s}
+score: 5=이 문항만으로 서류 통과, 4=통과 쪽, 3=애매, 2=감점 큼, 1=탈락 사유. 모든 문항에 답한다. 한국어로."""
 
 JUDGES = [
-    ("hr", "인사담당 (1차 서류)", "하루에 수백 장을 훑는 인사 담당자. 기술 용어를 잘 모른다. 첫 문장만 읽고 무엇을 했고 결과가 얼마인지 보이는지, 문항에 답했는지, 팀 성과와 본인 역할이 구분되는지, 늘어지는 문장이 없는지 본다."),
-    ("lead", "현업 팀장", "같이 일할 신입을 고르는 팀장. 기술 용어를 정확히 쓰는지, 경험이 공고 업무와 실제로 이어지는지, 입사 후 바로 맡길 일이 보이는지, 자격요건과 다른 점을 설득하는지 본다."),
-    ("interview", "면접관 (검증)", "서류를 들고 면접에서 파고들 사람. 경험 기록과 다르거나 기록에 없는 디테일, 팀 성과를 개인처럼 쓴 곳, 시뮬레이션을 실측처럼 쓴 곳을 찾고 꼬리질문을 Q: 형식으로 남긴다. 또 AI가 써 준 글을 그대로 낸 것 같은지 0~5로 매긴다(0=사람, 3=의심, 5=거의 확실히 AI). 본문 괄호, 문단마다 같은 틀, 교훈·다짐형 끝맺음, 연결어 남발, 셋씩 묶는 나열, 장면 없이 매끄럽기만 한 문장이 AI 티다."),
-    ("rival", "경쟁 지원자 비교", "같은 공고에 지원한 신입 100명의 서류를 본 심사위원. 누구나 쓰는 표현·소재인지, 차별점이 첫 문단에 보이는지, 회사 이름만 바꾸면 되는 글인지, 문항끼리 같은 이야기를 반복하는지 본다."),
-    ("jd", "공고 대조", "공고의 담당업무·자격요건·우대사항을 하나씩 체크한다. 항목마다 자소서 어디에서 근거를 댔는지, 비어 있는 항목은 무엇인지, 공고에 없는 회사 정보를 사실처럼 썼는지 본다."),
+    ("hr", "인사담당 (1차 서류)", """하루에 수백 장을 훑는 인사 담당자. 기술 용어를 잘 모른다. 설명 없이 용어만 이어져 이해가 안 되는 문장은 인용해서 지적한다. 기준:
+1) 소제목과 첫 문장만 읽고 무엇을 했고 결과가 얼마인지 보이는가 (두괄식, 숫자)
+2) 문항이 묻는 것에 답했는가 (예: '약점'에 약점을 썼는가, '포부'가 구체적인가)
+3) 팀 성과와 본인 역할이 구분되는가
+4) 늘어지는 문장, 다짐형 수식어, 글자수 채우기 문장
+5) 맞춤법·어색한 표현"""),
+    ("lead", "현업 팀장", """지원 부서의 팀장. 같이 일할 신입을 고른다. 기준:
+1) 기술 용어를 정확히 쓰는가, 깊이가 있는가 (용어만 나열했는지)
+2) 경험이 공고의 담당업무와 실제로 이어지는가, 아니면 억지로 갖다 붙였는가
+3) 입사 후 바로 맡길 수 있는 일이 보이는가
+4) 전공·경력이 공고 자격요건과 다를 때 그 차이를 설득하는가"""),
+    ("interview", "면접관 (검증)", """서류를 들고 면접에서 파고들 사람. 아래 '경험 기록'이 지원자의 실제 기록이다. 기준:
+1) 자소서의 주장·수치·역할이 경험 기록과 다르거나, 기록에 없는 디테일이 있는가 → 반드시 지적 (탈락 사유)
+2) 팀 성과를 개인 성과처럼, 시뮬레이션을 실측처럼 썼는가
+3) 면접에서 답하기 어려울 문장. points에 꼬리질문을 1~2개 포함한다 ("Q: …" 형식)
+4) AI가 써 준 글을 그대로 낸 것 같은지 0~5 (0=사람이 쓴 글, 3=의심, 5=거의 확실히 AI)를 "ai"에, 근거를 "ai_points"에"""),
+    ("rival", "경쟁 지원자 비교", """같은 공고에 지원한 다른 신입 100명의 서류를 본 심사위원. 기준:
+1) 누구나 쓰는 표현·소재인가 (꼼꼼함, 소통, 문제해결력, 동아리 협업 일반론)
+2) 이 지원자만의 차별점이 첫 문단에 보이는가
+3) 지원동기가 이 회사가 아니어도 그대로 쓸 수 있는 글인가 (회사 이름만 바꾸면 되는가)
+4) 문항끼리 같은 이야기를 반복하는가"""),
+    ("jd", "공고 대조", """공고의 담당업무·자격요건·우대사항을 하나씩 체크하는 심사위원. 기준:
+1) 공고 항목을 빠짐없이 뽑아, 항목마다 자소서 어디에서 근거를 댔는지 '충족/부분/없음'으로 판정한다
+2) 공고·회사 정보 자료에 없는 회사 정보를 사실처럼 썼는가
+3) 자격요건(전공·학위·자격증 등)과 맞지 않는 부분을 어떻게 다뤘는가
+공고 항목 판정은 최상위 "requirements"에 넣는다."""),
 ]
+
+JD_EXTRA = ', "requirements": [{"kind": "담당업무|자격요건|우대사항", "item": "공고 문구 요약", "status": "충족|부분|없음", "where": "Q2 \\"인용\\" 또는 빈칸", "note": "한 줄"}]'
+
+DETECTOR = """너는 'AI가 쓴 자기소개서'를 걸러 내는 채용 담당자다. 사람이 직접 쓴 글인지, 생성형 AI 글을 그대로 낸 것인지만 본다. 내용의 좋고 나쁨은 보지 않는다.
+AI 글의 흔한 특징:
+- 문단마다 똑같은 틀(문제→행동→결과→교훈)이 기계적으로 반복, 끝 문장이 교훈·다짐 정형구 ('~하는 인재가 되겠습니다', '~의 중요성을 깨달았습니다')
+- '~를 통해 / 또한 / 나아가 / 이를 바탕으로 / 뿐만 아니라' 같은 연결어 남발, 셋씩 묶는 나열, 역량·가치·시너지·성장 같은 추상 명사 나열
+- 본문 괄호 설명, 번역투, 문장 길이가 고르게 길고 매끄럽기만 하며 본인만 아는 장면·판단·실수·숫자의 맥락이 없음
+사람 글의 흔한 특징: 문장 길이가 들쭉날쭉, 구체적 장면과 고유명사, 그때의 판단과 시행착오, 약간 투박한 연결.
+아래 '규칙 신호'는 프로그램이 센 숫자다. 참고만 하고 문장을 직접 읽고 판단한다.
+답은 JSON 하나만:
+{"questions": [{"id": 1, "ai": 0~5, "verdict": "사람|애매|AI 의심", "sentences": [{"quote": "의심 문장 그대로", "why": "왜 AI 같은지", "how": "사람 글처럼 바꾸는 방향 (새 사실을 지어내지 말고, 경험 기록에 있는 장면·판단으로)"}], "human": ["사람이 쓴 것 같은 문장 인용"]}], "overall": "한두 문장"}
+0=사람이 쓴 글, 2=조금 다듬은 정도, 3=의심, 5=거의 확실히 AI. 의심 문장은 문항마다 최대 5개. 한국어로."""
+
+CONNECTIVES = ["또한", "나아가", "이를 바탕으로", "뿐만 아니라", "를 통해", "을 통해", "이러한", "따라서"]   # '이를 통해'는 '를 통해'로 셈
+CLICHES = ["역량", "시너지", "가치", "성장", "인재", "기여", "열정", "다양한", "노력", "도전", "소통"]
+PLEDGE = re.compile(r"(되겠습니다|하겠습니다|싶습니다|깨달았습니다|배웠습니다)[.!]?\s*$")
+
+
+def ai_signals(text: str) -> dict:
+    """AI 글 티를 규칙으로 센다 (AI 판단 아님). 제출용 글 한 문항."""
+    head, body = split_head(text)
+    sents = [x.strip() for x in re.split(r"(?<=[.!?다요])\s+|\n+", body) if len(x.strip()) >= 8]
+    lens = [len(x) for x in sents] or [0]
+    mean = sum(lens) / len(lens)
+    sd = (sum((l - mean) ** 2 for l in lens) / len(lens)) ** .5
+    paras = [x for x in re.split(r"\n\s*\n", body) if x.strip()]
+    conn = {w: body.count(w) for w in CONNECTIVES if body.count(w)}
+    cli = {w: body.count(w) for w in CLICHES if body.count(w)}
+    pledge = sum(1 for p in paras if PLEDGE.search(p.strip().splitlines()[-1]))
+    triples = len(re.findall(r"[가-힣A-Za-z0-9]+[,·]\s*[가-힣A-Za-z0-9]+[,·]\s*(그리고\s*)?[가-힣A-Za-z0-9]+(을|를|과|와|의|에)\s", body))
+    r = {
+        "sentences": len(sents), "avg_len": round(mean), "len_spread": round(sd / mean, 2) if mean else 0,
+        "connectives": conn, "cliches": cli, "pledge_endings": pledge, "triples": triples,
+        "parens": len(re.findall(r"\([^)]{1,40}\)", body)), "hayeot": body.count("하였습니다"),
+        "has_number": bool(re.search(r"\d", body)),
+    }
+    flags = []
+    if r["parens"]:
+        flags.append(f"본문 괄호 설명 {r['parens']}곳")
+    if sum(conn.values()) >= 4:
+        flags.append("연결어 많음: " + ", ".join(f"{k} {v}" for k, v in conn.items()))
+    if sum(cli.values()) >= 4:
+        flags.append("추상 명사 많음: " + ", ".join(f"{k} {v}" for k, v in cli.items()))
+    if pledge >= 2 or (paras and pledge == len(paras) and len(paras) >= 2):
+        flags.append(f"문단 끝이 다짐·교훈형 {pledge}곳")
+    if len(sents) >= 6 and r["len_spread"] < 0.25:
+        flags.append(f"문장 길이가 지나치게 고름 (편차 {r['len_spread']})")
+    if triples >= 2:
+        flags.append(f"셋씩 묶는 나열 {triples}곳")
+    if r["hayeot"] > 2:
+        flags.append(f"'하였습니다' {r['hayeot']}번")
+    if not r["has_number"]:
+        flags.append("숫자·구체 결과 없음")
+    r["flags"] = flags
+    r["rule_score"] = min(5, len(flags))   # 신호 개수. 0~5. AI 판별관 점수와 따로 보여 준다
+    return r
+
+
+def decision(summary: dict, panel: dict) -> dict:
+    """심사관 판정을 모아 서류 결과를 낸다. 규칙: 탈락 표가 하나라도 있으면 '탈락 위험',
+    모든 문항 평균 ≥ 3.5, AI 의심 ≤ 2, 담당업무·자격요건 중 근거 없는 항목 0이면 '통과 가능', 나머지 '보류'.
+    (AI 심사관 의견일 뿐 실제 합격과 무관)"""
+    fails = []
+    for key, name, _ in JUDGES:
+        for x in (panel.get(key) or {}).get("questions", []):
+            if str(x.get("verdict", "")).startswith("탈락"):
+                fails.append(f"{name} Q{x.get('id')}")
+    avgs = [v["avg"] for v in summary.values() if v["avg"] is not None]
+    ais = [v["ai"] for v in summary.values() if v["ai"] is not None]
+    reqs = (panel.get("jd") or {}).get("requirements") or []
+    miss = [r for r in reqs if str(r.get("status", "")).startswith("없음")]
+    if fails:
+        label = "탈락 위험"
+    elif avgs and min(avgs) >= 3.5 and (not ais or max(ais) <= 2) and not any(
+            str(r.get("kind", "")).startswith(("담당", "자격")) for r in miss):
+        label = "통과 가능"
+    else:
+        label = "보류"
+    return {"label": label, "fails": fails, "min_avg": min(avgs) if avgs else None, "max_ai": max(ais) if ais else None,
+            "req_total": len(reqs), "req_met": sum(1 for r in reqs if str(r.get("status", "")).startswith("충족")),
+            "req_missing": [r.get("item", "") for r in miss]}
 
 
 def split_head(text: str) -> tuple[str, str]:
@@ -145,9 +249,14 @@ def mech_check(answers: dict[int, str], questions: list[dict], exp_ids: set[str]
 
 
 class JasoRun:
-    """mode='write': 작성 → 심사 → 수정 반복.  mode='review': 지금 저장된 답을 심사만 (GitHub의 panel과 같음, 고치지 않음)."""
+    """mode='write': 작성 → 서류 심사 + AI 작성 확인 → 수정 반복.
+    mode='screen': 저장된 답을 공고 기준으로 서류 심사만 (심사관 5명, GitHub의 panel과 같음, 고치지 않음).
+    mode='aicheck': 저장된 답이 AI가 쓴 글처럼 보이는지만 확인 (규칙 신호 + AI 판별관 1명, 고치지 않음)."""
 
     def __init__(self, cfg: dict, keys: dict, lib: Library, app_name: str, on_event, mock=None, mode: str = "write"):
+        mode = {"review": "screen"}.get(mode, mode)
+        if mode not in ("write", "screen", "aicheck"):
+            raise ValueError(mode)
         self.cfg, self.keys, self.lib, self.on_event, self.mock, self.mode = cfg, keys, lib, on_event, mock, mode
         self.app_name = app_name
         self.app = lib.app_full(app_name)
@@ -180,37 +289,67 @@ class JasoRun:
                f"# 문항\n{q}\n\n# 경험 기록\n{exp[:90000]}")
         return mat, ids
 
+    def _shown(self, answers, mech):
+        return "\n\n".join(f"## Q{q['id']}. {q['text']} — {mech['per_q'][q['id']]['chars']}/{q['limit']}자\n{strip_tags(answers.get(q['id'], ''))}"
+                           for q in self.questions)
+
     def panel(self, answers: dict[int, str], mat: str, mech: dict) -> dict:
-        shown = "\n\n".join(f"## Q{q['id']}. {q['text']} — {mech['per_q'][q['id']]['chars']}/{q['limit']}자\n{strip_tags(answers.get(q['id'], ''))}" for q in self.questions)
+        """서류 심사: 심사관 5명."""
+        shown = self._shown(answers, mech)
         res = {}
         for key, name, role in JUDGES:
             extra = ', "ai": 0~5, "ai_points": ["\\"인용\\" → 이유"]' if key == "interview" else ""
-            system = COMMON % extra + f"\n\n# 너의 역할: {name}\n{role}"
+            system = COMMON % (extra, JD_EXTRA if key == "jd" else "") + f"\n\n# 너의 역할: {name}\n{role}"
             user = f"{mat}\n\n# 기계 점검\n{json.dumps(mech['errors'] + mech['warnings'], ensure_ascii=False)}\n\n# 평가할 자소서\n{shown}"
             try:
                 res[key] = self.ask("judge", system, user)
             except Exception as e:   # noqa: BLE001  심사관 하나 실패는 표시만 하고 계속
+                if self.stop_flag.is_set():
+                    raise
                 res[key] = {"error": str(e)}
         return res
 
+    def detect(self, answers: dict[int, str], mat: str, mech: dict) -> dict:
+        """AI 작성 확인: 규칙 신호 + AI 판별관 1명. 경험 기록은 '사람만 아는 장면'이 있는지 대조용으로 같이 보낸다."""
+        sig = {q["id"]: ai_signals(strip_tags(answers.get(q["id"], ""))) for q in self.questions}
+        user = (f"{mat}\n\n# 규칙 신호\n" + json.dumps({f"Q{k}": v["flags"] for k, v in sig.items()}, ensure_ascii=False) +
+                f"\n\n# 판별할 자소서\n{self._shown(answers, mech)}")
+        try:
+            judge = self.ask("judge", DETECTOR, user)
+        except Exception as e:   # noqa: BLE001
+            if self.stop_flag.is_set():
+                raise
+            judge = {"error": str(e)}
+        return {"signals": sig, "judge": judge}
+
     @staticmethod
-    def summarize(panel: dict, questions: list[dict]) -> dict:
+    def _num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def summarize(cls, panel: dict, questions: list[dict], det: dict | None = None) -> dict:
         per = {}
         for q in questions:
-            scores, ai = [], None
+            scores, ai_i, ai_d = [], None, None
             for key, *_ in JUDGES:
                 for x in (panel.get(key) or {}).get("questions", []):
-                    if int(x.get("id", 0)) == q["id"]:
-                        try:
-                            scores.append(float(x.get("score")))
-                        except (TypeError, ValueError):
-                            pass
-                        if key == "interview" and x.get("ai") is not None:
-                            try:
-                                ai = float(x["ai"])
-                            except (TypeError, ValueError):
-                                pass
-            per[q["id"]] = {"avg": round(sum(scores) / len(scores), 2) if scores else None, "min": min(scores) if scores else None, "ai": ai}
+                    if int(x.get("id", 0) or 0) == q["id"]:
+                        v = cls._num(x.get("score"))
+                        if v is not None:
+                            scores.append(v)
+                        if key == "interview":
+                            ai_i = cls._num(x.get("ai"))
+            for x in ((det or {}).get("judge") or {}).get("questions", []):
+                if int(x.get("id", 0) or 0) == q["id"]:
+                    ai_d = cls._num(x.get("ai"))
+            ais = [a for a in (ai_i, ai_d) if a is not None]
+            per[q["id"]] = {"avg": round(sum(scores) / len(scores), 2) if scores else None, "min": min(scores) if scores else None,
+                            "ai_interview": ai_i, "ai_detector": ai_d,
+                            "rule_flags": len(((det or {}).get("signals") or {}).get(q["id"], {}).get("flags", [])) if det else None,
+                            "ai": max(ais) if ais else None}   # 둘 중 높은 쪽을 기준으로
         return per
 
     def run(self):
@@ -229,10 +368,10 @@ class JasoRun:
             self.emit("system", f"경험 {len(ids)}개({', '.join(sorted(ids))})를 근거로 씁니다. 공고·경험 내용은 고른 AI 회사로 전송됩니다."
                       + (f"\n{', '.join(unconf)}에는 아직 [확인 필요]가 남아 있어, 그 부분은 사실로 쓰지 않습니다." if unconf else ""), "info")
 
-            if self.mode == "review":
+            if self.mode in ("screen", "aicheck"):
                 answers = {q["id"]: a["answers"].get(str(q["id"]), "") for q in self.questions}
                 if not any(v.strip() for v in answers.values()):
-                    raise RuntimeError("심사할 답이 없습니다. 먼저 작성하거나 답 칸에 붙여 넣고 저장해 주세요")
+                    raise RuntimeError("확인할 답이 없습니다. 답 칸에 쓰거나 붙여 넣고 저장해 주세요")
                 max_rounds = 1
             else:
                 max_rounds = max(1, min(5, int(a.get("max_rounds", 3))))
@@ -242,24 +381,37 @@ class JasoRun:
 
             for rnd in range(1, max_rounds + 1):
                 mech = mech_check(answers, self.questions, ids)
-                pnl = self.panel(answers, mat, mech)
-                summ = self.summarize(pnl, self.questions)
-                ok = (not mech["errors"]) and all(
-                    s["ai"] is not None and s["ai"] <= target_ai and s["avg"] is not None and s["avg"] >= target_avg for s in summ.values())
-                rec = {"round": rnd, "mode": self.mode, "answers": dict(answers), "mech": mech, "panel": pnl, "summary": summ, "ok": ok}
+                pnl = self.panel(answers, mat, mech) if self.mode in ("write", "screen") else {}
+                det = self.detect(answers, mat, mech) if self.mode in ("write", "aicheck") else None
+                summ = self.summarize(pnl, self.questions, det)
+                dec = decision(summ, pnl) if pnl else None
+                if self.mode == "aicheck":
+                    ok = all(s["ai"] is not None and s["ai"] <= target_ai for s in summ.values())
+                else:
+                    ok = (not mech["errors"]) and all(
+                        s["ai"] is not None and s["ai"] <= target_ai and s["avg"] is not None and s["avg"] >= target_avg for s in summ.values())
+                rec = {"round": rnd, "mode": self.mode, "answers": dict(answers), "mech": mech, "panel": pnl, "detect": det,
+                       "summary": summ, "decision": dec, "ok": ok}
                 self.rounds.append(rec)
-                self.emit("judge", f"{rnd}차 심사" if self.mode == "write" else "심사 결과 (고치지 않음)", "scores", round=rnd,
-                          summary=summ, mech=mech, panel=pnl, questions=self.questions)
+                if pnl:
+                    self.emit("judge", f"{rnd}차 서류 심사" if self.mode == "write" else "서류 심사 결과 (글은 고치지 않음)", "scores",
+                              round=rnd, summary=summ, mech=mech, panel=pnl, questions=self.questions, decision=dec)
+                if det:
+                    self.emit("detector", f"{rnd}차 AI 작성 확인" if self.mode == "write" else "AI 작성 확인 결과 (글은 고치지 않음)", "aicheck",
+                              round=rnd, detect=det, summary=summ, questions=self.questions, target=target_ai)
                 if self.best is None or self._better(rec, self.best):
                     self.best = rec
                 if ok:
-                    self.emit("system", f"기준(AI 의심 ≤ {target_ai:g}, 평균 ≥ {target_avg:g}, 규칙 오류 0)을 넘었습니다.", "info")
+                    self.emit("system", f"기준(AI 의심 ≤ {target_ai:g}" + ("" if self.mode == "aicheck" else f", 평균 ≥ {target_avg:g}, 규칙 오류 0") + ")을 넘었습니다.", "info")
                     break
                 if rnd == max_rounds:
                     if self.mode == "write":
                         self.emit("system", f"{max_rounds}차까지 기준을 다 넘지 못했습니다. 가장 나은 {self.best['round']}차 결과를 보여 드립니다.", "info")
                     break
-                fb = {k: {"overall": v.get("overall"), "questions": v.get("questions")} for k, v in pnl.items() if "error" not in v}
+                fb = {k: {"overall": v.get("overall"), "questions": v.get("questions"), "requirements": v.get("requirements")}
+                      for k, v in pnl.items() if "error" not in v}
+                if det and "error" not in det["judge"]:
+                    fb["ai_detector"] = {"questions": det["judge"].get("questions"), "rule_signals": {f"Q{k}": v["flags"] for k, v in det["signals"].items()}}
                 user = (f"{mat}\n\n# 지금 답\n" + "\n\n".join(f"## Q{k}\n{v}" for k, v in answers.items()) +
                         f"\n\n# 기계 점검\n{json.dumps(mech, ensure_ascii=False)}\n\n# 심사 결과\n{json.dumps(fb, ensure_ascii=False)[:30000]}")
                 d = self.ask("writer", prompt + REVISER_TAIL, user)
@@ -269,7 +421,7 @@ class JasoRun:
 
             self.lib.review_save(self.app_name, {"time": dt.datetime.now().isoformat(timespec="seconds"), "best_round": self.best["round"],
                                                  "rounds": self.rounds})
-            if self.mode == "review":
+            if self.mode != "write":
                 self.state = "done"
                 return
             self.state = "waiting_approval"

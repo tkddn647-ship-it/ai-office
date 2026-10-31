@@ -102,11 +102,19 @@ def demo_mock(system: str, user: str) -> str:
         ids = sorted({int(n) for n in _re.findall(r"^Q(\d+)\.", user, _re.M)}) or [1]
         return json.dumps({"answers": [{"id": i, "text": f"[데모 소제목 {i}: 숫자 1개 포함]\n가짜 AI가 쓴 데모 문장입니다. [공고]"} for i in ids],
                            "note": "데모라 경험 기록을 읽지 않았습니다."}, ensure_ascii=False)
+    if "AI가 쓴 자기소개서" in system:
+        import re as _re
+        ids = sorted({int(n) for n in _re.findall(r"^## Q(\d+)\.", user, _re.M)}) or [1]
+        return json.dumps({"questions": [{"id": i, "ai": 1, "verdict": "사람", "sentences": [{"quote": "가짜 AI가 쓴 데모 문장입니다.", "why": "데모", "how": "데모"}], "human": []} for i in ids],
+                           "overall": "데모 판별입니다."}, ensure_ascii=False)
     if "서류 심사 패널" in system:
         import re as _re
         ids = sorted({int(n) for n in _re.findall(r"^## Q(\d+)\.", user, _re.M)}) or [1]
         return json.dumps({"questions": [{"id": i, "verdict": "통과", "score": 4, "points": [], "fix": "", "ai": 1} for i in ids],
-                           "overall": "데모 심사입니다."}, ensure_ascii=False)
+                           "overall": "데모 심사입니다.",
+                           **({"requirements": [{"kind": "담당업무", "item": "데모 업무", "status": "충족", "where": "Q1", "note": ""},
+                                                {"kind": "우대사항", "item": "데모 우대", "status": "없음", "where": "", "note": "근거 없음"}]}
+                              if "공고 대조" in system else {})}, ensure_ascii=False)
     if "팀장" in system:
         return json.dumps({"summary": "데모: 파일 하나 만들기", "chat": "가짜 AI로 흐름만 시험합니다.",
                            "tasks": [{"title": "데모 파일 만들기", "instructions": "AI_OFFICE_DEMO.md 생성",

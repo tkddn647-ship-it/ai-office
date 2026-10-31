@@ -193,9 +193,13 @@ class Handler(BaseHTTPRequestHandler):
                                       **({"fetch": self.server.fetch} if getattr(self.server, "fetch", None) else {}))
                 elif mode == "jaso":
                     name = b.get("app") or ""
-                    jm = "review" if b.get("jaso_mode") == "review" else "write"
+                    jm = {"review": "screen"}.get(b.get("jaso_mode"), b.get("jaso_mode")) or "write"
+                    if jm not in ("write", "screen", "aicheck"):
+                        return self._send(400, {"error": "모르는 자소서 작업"})
                     run = JasoRun(cfg, keys, _lib(), name, _push, mock=mock, mode=jm)
-                    first = f"{name} " + ("심사만 합니다 (글은 고치지 않음)." if jm == "review" else "자소서 작성을 시작합니다.")
+                    first = f"{name} " + {"write": "자소서 작성을 시작합니다. 회차마다 서류 심사와 AI 작성 확인을 함께 합니다.",
+                                          "screen": "공고 기준 서류 심사를 합니다 (글은 고치지 않음).",
+                                          "aicheck": "AI가 쓴 글처럼 보이는지 확인합니다 (글은 고치지 않음)."}[jm]
                 else:
                     return self._send(400, {"error": "모르는 모드"})
             except (WorkspaceError, LibraryError) as e:

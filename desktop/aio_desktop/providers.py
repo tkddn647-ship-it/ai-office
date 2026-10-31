@@ -15,6 +15,7 @@ PROVIDERS = {
     "openai": {"label": "OpenAI", "default_model": "gpt-4o-mini"},
     "anthropic": {"label": "Anthropic (Claude)", "default_model": "claude-sonnet-4-5"},
     "gemini": {"label": "Google Gemini", "default_model": "gemini-flash-latest"},
+    "claudecode": {"label": "Claude Code (구독, setup-token)", "default_model": ""},
     "cursor": {"label": "Cursor (Cursor CLI 필요)", "default_model": ""},
     "mock": {"label": "테스트용 가짜 AI (키 불필요)", "default_model": "mock"},
 }
@@ -123,6 +124,10 @@ def _post(url: str, headers: dict, body: dict, timeout: int) -> dict:
                 last = f"HTTP {e.code}: {detail}"
                 time.sleep(2 * (attempt + 1))
                 continue
+            if "credit balance is too low" in detail:
+                raise ProviderError("Claude API 크레딧이 없습니다. platform.claude.com의 Billing에서 충전하거나, "
+                                    "Pro·Max 구독이 있으면 'Claude Code (구독)'을 고르고 claude setup-token 토큰을 넣으세요. "
+                                    f"(HTTP {e.code}: {detail[:200]})") from None
             raise ProviderError(f"HTTP {e.code}: {detail}") from None
         except (urllib.error.URLError, TimeoutError) as e:
             last = str(e)
@@ -146,7 +151,7 @@ def chat(provider: str, model: str, key: str, system: str, user: str,
     try:
         return _chat(provider, model, key, system, user, json_mode, timeout, mock, files)
     except ProviderError as e:
-        if _no_fix or provider in ("mock", "cursor") or not key or not is_model_error(str(e)):
+        if _no_fix or provider in ("mock", "cursor", "claudecode") or not key or not is_model_error(str(e)):
             raise
         if not AUTO_FIX:
             raise ProviderError(f"모델 '{model}'을(를) 쓸 수 없습니다. 왼쪽 'AI 회사·모델'에서 목록 새로고침 후 다른 모델을 골라 주세요. ({str(e)[:200]})") from None
@@ -250,6 +255,72 @@ def _cursor(model: str, key: str, system: str, user: str, timeout: int) -> tuple
     return result, {"in": len(system) + len(user), "out": len(result)}
 
 
+CLAUDE_INSTALL_WIN = "irm https://claude.ai/install.ps1 | iex"
+
+
+def find_claude_cli() -> str | None:
+    """Claude Code CLI(claude). Windows 기본 설치 위치: %USERPROFILE%\\.local\\bin\\claude.exe"""
+    import shutil
+    from pathlib import Path
+    p = shutil.which("claude")
+    if p:
+        return p
+    for c in (Path.home() / ".local/bin/claude.exe", Path.home() / ".local/bin/claude"):
+        if c.is_file():
+            return str(c)
+    return None
+
+
+def _claude_code(model: str, token: str, system: str, user: str, files: list[dict] | None, timeout: int) -> tuple[str, dict]:
+    """Claude Code를 화면 없이(-p) 부른다. 구독 토큰(claude setup-token)은 CLAUDE_CODE_OAUTH_TOKEN으로 넘긴다.
+    - 빈 임시 폴더에서 실행. 프롬프트는 표준 입력으로 (명령줄 길이 한계 없음).
+    - 쓸 수 있는 도구는 Read 하나뿐 (사진·PDF가 있을 때 그 파일을 읽는 용도). 셸·쓰기·웹 도구는 막는다.
+    - 토큰이 비어 있으면 이 PC에서 claude 로그인(/login)된 계정을 쓴다."""
+    import base64
+    import os
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    exe = find_claude_cli()
+    if not exe:
+        raise ProviderError(f"Claude Code(claude)를 찾지 못했습니다. PowerShell에서 ① {CLAUDE_INSTALL_WIN}  ② 새 창에서 claude setup-token 을 실행해 "
+                            "나온 토큰을 앱의 'Claude Code' 키 칸에 넣으세요.")
+    with tempfile.TemporaryDirectory(prefix="aio-claude-") as tmp:
+        names = []
+        for i, f in enumerate(files or []):
+            n = f"{i + 1:02d}-{Path(f.get('name') or 'file').name}"
+            (Path(tmp) / n).write_bytes(base64.b64decode(f["data"]))
+            names.append(n)
+        att = ("\n\n# 첨부 파일 (이 폴더에 있음. Read 도구로 하나씩 모두 읽을 것)\n" + "\n".join(f"- ./{n}" for n in names)) if names else ""
+        prompt = f"# 지시\n{system}\n\n# 입력\n{user}{att}\n\n지시한 형식의 답만 출력한다. 파일을 만들거나 고치지 않는다."
+        cmd = [exe, "-p", "--output-format", "json", "--max-turns", str(4 + len(names)),
+               "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Task"]
+        if model:
+            cmd += ["--model", model]
+        env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}  # 구독 토큰이 쓰이게
+        if token:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = token.strip()
+        try:
+            p = subprocess.run(cmd, cwd=tmp, env=env, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            raise ProviderError(f"Claude Code가 {timeout}초 안에 답하지 않았습니다") from None
+    out = (p.stdout or "").strip()
+    try:
+        d = json.loads(out[out.find("{"):])
+    except (json.JSONDecodeError, ValueError):
+        d = {}
+    result = d.get("result", "") if d else out
+    if p.returncode or d.get("is_error") or (d and d.get("subtype", "success") != "success"):
+        msg = str(result or p.stderr or out)
+        if re.search(r"log ?in|authenticat|401|invalid bearer|oauth", msg, re.I):
+            raise ProviderError("Claude Code 로그인이 안 됩니다. PowerShell에서 'claude setup-token'으로 토큰을 새로 만들어 앱의 Claude Code 키 칸에 넣으세요. "
+                                f"(구독 Pro·Max·Team·Enterprise 필요) ({msg.strip()[-200:]})")
+        raise ProviderError(f"Claude Code 오류 (exit {p.returncode}): {msg.strip()[-400:]}")
+    u = d.get("usage") or {}
+    return result, {"in": u.get("input_tokens", 0), "out": u.get("output_tokens", 0)}
+
+
 def _cursor_err(code: int, msg: str) -> str:
     if re.search(r"log ?in|authenticat|unauthori|not signed|api key", msg, re.I):
         return ("Cursor CLI에 로그인돼 있지 않습니다. PowerShell에서 'agent login'을 실행해 로그인하거나, "
@@ -268,6 +339,8 @@ def _chat(provider: str, model: str, key: str, system: str, user: str,
     model = model or PROVIDERS.get(provider, {}).get("default_model", "")
     if provider == "mock":
         return (mock or demo_mock)(system, user), {"in": len(user), "out": 0}
+    if provider == "claudecode":
+        return _claude_code(model, key, system, user, files, max(timeout, 300))
     if provider == "cursor":
         if files:
             raise ProviderError("Cursor로는 이 앱에서 사진·PDF를 읽을 수 없습니다. '사진·PDF 읽기' 역할은 Gemini·OpenAI·Claude 중 하나로 바꿔 주세요.")

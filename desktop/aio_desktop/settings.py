@@ -42,7 +42,7 @@ DEFAULT = {
     # 다음에 켤 때 그대로 열리게: 마지막 탭, 마지막 지원서, 마지막 경험
     "ui": {"mode": "jaso", "sub": "exp", "app": "", "exp": "", "onboarded": False},
     # 회사별로 내가 고른 모델. 역할은 회사만 고르고 모델은 여기 것을 쓴다 (역할마다 다르게 하려면 role의 override)
-    "models": {"openai": "", "anthropic": "", "gemini": "", "cursor": ""},
+    "models": {"openai": "", "anthropic": "", "gemini": "", "claudecode": "", "cursor": ""},
     "model_lists": {},          # 회사별 마지막으로 받은 모델 목록 {회사: {"at": 시각, "ids": [...]}}
     "auto_model_fix": True,     # 고른 모델이 없어졌을 때 되는 모델로 자동으로 바꿀지
     "data_dir": "",   # 자소서 자료 폴더. 비우면 문서\AIOffice자소서

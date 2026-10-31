@@ -273,6 +273,32 @@ class CursorTest(unittest.TestCase):
                 os.environ["PATH"] = old
 
 
+@unittest.skipIf(sys.platform == "win32", "가짜 CLI를 셸 스크립트로 만듦")
+class ClaudeCodeTest(unittest.TestCase):
+    def test_token_stdin_and_files(self):
+        import base64
+        with tempfile.TemporaryDirectory() as d:
+            exe = Path(d) / "claude"
+            exe.write_text("#!" + sys.executable + "\nimport json,os,sys\nprompt=sys.stdin.read()\n"
+                           "print(json.dumps({'type':'result','subtype':'success','is_error':False,'result':json.dumps({'n':len(prompt),"
+                           "'files':sorted(os.listdir('.')),'tok':os.environ.get('CLAUDE_CODE_OAUTH_TOKEN',''),'api':os.environ.get('ANTHROPIC_API_KEY',''),"
+                           "'tools':sys.argv[sys.argv.index('--allowedTools')+1]})}))\n", encoding="utf-8")
+            exe.chmod(0o755)
+            old = os.environ["PATH"]
+            os.environ["PATH"] = d + os.pathsep + old
+            os.environ["ANTHROPIC_API_KEY"] = "sk-should-not-leak"
+            try:
+                t, _ = providers.chat("claudecode", "", "sk-ant-oat-x", "규칙", "가" * 50000,
+                                      files=[{"name": "공고.png", "mime": "image/png", "data": base64.b64encode(b"png").decode()}])
+                r = json.loads(t)
+                self.assertGreater(r["n"], 50000)
+                self.assertEqual(r["files"], ["01-공고.png"])
+                self.assertEqual((r["tok"], r["api"], r["tools"]), ("sk-ant-oat-x", "", "Read"))
+            finally:
+                os.environ["PATH"] = old
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
 class LifetimeTest(unittest.TestCase):
     def test_close_waits_for_running_job(self):
         from aio_desktop import window

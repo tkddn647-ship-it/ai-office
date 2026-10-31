@@ -306,6 +306,9 @@ async function load(){
     // 모델 고르기
     const cur=(c.models||{})[k]||""; const lst=((c.model_lists||{})[k]||{});
     if(k==="cursor"){ keys.append(el("input",{id:"mdl_"+k,value:cur,placeholder:"모델 (비우면 Cursor 기본 모델)",style:"margin-top:4px"})); continue; }
+    if(k==="claudecode"){ const cs=el("select",{id:"mdl_"+k,style:"margin-top:4px"}); [["","기본 모델 (Claude Code 설정)"],["sonnet","sonnet (빠르고 무난)"],["opus","opus (가장 꼼꼼, 사용량 많음)"],["haiku","haiku (가장 가벼움)"]].forEach(([v2,t])=>cs.append(el("option",{value:v2,textContent:t})));
+      if(cur&&![...cs.options].some(o=>o.value===cur)) cs.append(el("option",{value:cur,textContent:cur})); cs.value=cur; cs.onchange=()=>save();
+      keys.append(cs,el("div",{className:"hint",textContent:"키 칸에는 PowerShell에서 'claude setup-token'으로 만든 토큰을 넣습니다. 비우면 이 PC에서 claude에 로그인된 계정을 씁니다. 사용량은 구독에서 차감됩니다."})); continue; }
     const ms=el("select",{id:"mdl_"+k}); const ids=[...new Set([...(cur?[cur]:[]),...(lst.ids||[])])];
     ms.append(el("option",{value:"",textContent:ids.length?"모델 고르기":"↻ 를 눌러 목록 받기 (키 필요)"}));
     ids.forEach(id=>ms.append(el("option",{value:id,textContent:id+(id===(lst.ids||[])[0]?"  · 추천":"")})));
@@ -678,7 +681,8 @@ async function refreshChecklist(){
 const WIZ={step:0,prov:"gemini"};
 const PINFO={gemini:{name:"Google Gemini",url:"https://aistudio.google.com/apikey",note:"무료 등급이 있어 부담 없이 시작하기 좋습니다. 단, 무료 등급은 Google이 입력 내용을 서비스 개선에 쓰고 사람이 검토할 수 있습니다(약관 확인 필요). 개인정보가 든 자소서는 유료 등급을 권합니다."},
   openai:{name:"OpenAI (ChatGPT)",url:"https://platform.openai.com/api-keys",note:"ChatGPT 구독과 API는 별도 결제입니다. API 사용량만큼 청구됩니다."},
-  anthropic:{name:"Anthropic (Claude)",url:"https://console.anthropic.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다. 긴 글쓰기에 강한 편입니다."},
+  anthropic:{name:"Anthropic (Claude API)",url:"https://platform.claude.com/settings/keys",note:"Claude 구독과 API는 별도 결제입니다 (콘솔 Billing에서 크레딧 충전 필요). 키를 만들 때 워크스페이스를 하나 고르세요. 구독만 있으면 'Claude Code (구독)'을 고르세요."},
+  claudecode:{name:"Claude Code (구독)",url:"https://code.claude.com/docs/en/setup",note:"Claude Pro·Max·Team 구독으로 씁니다 (API 크레딧 충전 불필요, 사용량은 구독에서 차감). PowerShell에서 Claude Code를 설치하고 'claude setup-token'으로 만든 토큰을 아래에 넣으세요. 사진·PDF도 읽을 수 있습니다."},
   cursor:{name:"Cursor",url:"https://cursor.com/docs/cli/installation",note:"Cursor CLI(명령 이름 agent)를 씁니다. CLI에 로그인돼 있으면 키는 비워도 되고, 아니면 Cursor 대시보드에서 만든 API 키를 넣으세요. 사용량은 Cursor 요금제에서 차감됩니다(요금제마다 다름). 사진·PDF 읽기는 Cursor로 안 되므로 그 역할만 다른 AI가 필요합니다."}};
 function wizOpen(){ WIZ.step=0; document.getElementById("wiz").style.display="flex"; wizDraw(); }
 function wizClose(done){ document.getElementById("wiz").style.display="none"; if(done){ UI.onboarded=true; RESTORED=true; uiSave(); } refreshChecklist(); }
@@ -689,12 +693,12 @@ function wizDraw(){ const c=document.getElementById("wizcard"); c.innerHTML="";
     const pick=el("div",{className:"pick"});
     Object.entries(PINFO).forEach(([k,v])=>pick.append(el("button",{className:k===WIZ.prov?"on":"",innerHTML:`<b>${v.name}</b>`+(KEYS_SET[k]?'<br><span class="keyset">● 키 저장됨</span>':""),onclick:()=>{WIZ.prov=k;wizDraw()}})));
     const v=PINFO[WIZ.prov]; c.append(pick,el("div",{className:"hint",textContent:v.note}));
-    if(WIZ.prov==="cursor"){ const cmd1="irm 'https://cursor.com/install?win32=true' | iex", cmd2="agent login";
+    if(WIZ.prov==="claudecode"||WIZ.prov==="cursor"){ const cc=WIZ.prov==="claudecode"; const cmd1=cc?"irm https://claude.ai/install.ps1 | iex":"irm 'https://cursor.com/install?win32=true' | iex", cmd2=cc?"claude setup-token":"agent login";
       const line=(t)=>el("div",{className:"row",style:"margin-top:4px"},[el("code",{textContent:t,style:"flex:1;background:#f2f4f8;padding:6px 8px;border-radius:6px;font-size:12px;overflow:auto"}),
         el("button",{className:"ghost",textContent:"복사",style:"flex:none",onclick:()=>navigator.clipboard.writeText(t)})]);
-      c.append(el("div",{className:"hint",style:"margin-top:8px",innerHTML:"<b>Cursor 편집기와 Cursor CLI는 다른 프로그램입니다.</b> 편집기만 깔려 있으면 CLI를 따로 설치해야 합니다. 시작 메뉴에서 <b>PowerShell</b>을 열고 아래 두 줄을 차례로 붙여 넣으세요 (두 번째 줄은 브라우저에서 Cursor 로그인)."}),line(cmd1),line(cmd2)); }
-    const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":(WIZ.prov==="cursor"?"Cursor API 키 (CLI에 로그인돼 있으면 비워도 됨)":"API 키 붙여 넣기")}); const out=el("div",{className:"hint"});
-    c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">${WIZ.prov==="cursor"?"CLI 설치 안내":"여기서 발급"}</a>`}),key,out);
+      c.append(el("div",{className:"hint",style:"margin-top:8px",innerHTML:cc?"시작 메뉴에서 <b>PowerShell</b>을 열고 첫 줄로 설치한 뒤, <b>새 PowerShell 창</b>에서 둘째 줄을 실행하세요. 브라우저 로그인 후 터미널에 나온 토큰(한 번만 보임)을 복사해 아래 키 칸에 넣습니다. 이미 설치했다면 둘째 줄만.":"<b>Cursor 편집기와 Cursor CLI는 다른 프로그램입니다.</b> 편집기만 깔려 있으면 CLI를 따로 설치해야 합니다. 시작 메뉴에서 <b>PowerShell</b>을 열고 아래 두 줄을 차례로 붙여 넣으세요 (두 번째 줄은 브라우저에서 Cursor 로그인)."}),line(cmd1),line(cmd2)); }
+    const key=el("input",{type:"password",placeholder:KEYS_SET[WIZ.prov]?"저장됨 · 바꾸려면 새로 입력":(WIZ.prov==="cursor"?"Cursor API 키 (CLI에 로그인돼 있으면 비워도 됨)":WIZ.prov==="claudecode"?"claude setup-token 토큰 (sk-ant-oat…)":"API 키 붙여 넣기")}); const out=el("div",{className:"hint"});
+    c.append(el("label",{innerHTML:`API 키 · <a href="${v.url}" target="_blank" rel="noopener">${WIZ.prov==="cursor"||WIZ.prov==="claudecode"?"설치 안내":"여기서 발급"}</a>`}),key,out);
     c.append(el("div",{className:"wbtns"},[el("button",{className:"ghost",textContent:"키 없이 둘러보기 (가짜 AI)",onclick:async()=>{await wizApply("mock","");WIZ.step=1;wizDraw()}}),
       el("button",{textContent:"키 확인하고 다음",onclick:async()=>{ out.textContent="확인 중…"; try{ await wizApply(WIZ.prov,key.value.trim());
         out.textContent="키 확인하고 지금 쓸 수 있는 모델을 찾는 중…";

@@ -187,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 from . import providers as pv
                 prov = q.get("provider", "")
                 key = settings.get_keys().get(prov, "")
-                if prov not in pv.PROVIDERS or prov in ("mock", "cursor"):
+                if prov not in pv.PROVIDERS or prov in ("mock", "cursor", "claudecode"):
                     return self._send(200, {"models": []})
                 if not key:
                     return self._send(400, {"error": "먼저 키를 넣고 저장해 주세요"})
@@ -314,6 +314,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "모르는 AI"})
                 if prov == "mock":
                     return self._send(200, {"ok": True, "model": "mock", "models": ["mock"], "changed": []})
+                if prov == "claudecode":
+                    if not pv.find_claude_cli():
+                        return self._send(400, {"error": f"Claude Code(claude)가 이 PC에 없습니다. PowerShell에서 {pv.CLAUDE_INSTALL_WIN} 로 설치한 뒤 새 창에서 claude setup-token 을 실행하세요."})
+                    cfg = settings.load_config()
+                    m = (cfg.get("models") or {}).get("claudecode", "")
+                    pv.chat("claudecode", m, settings.get_keys().get("claudecode", ""), "Reply with JSON only.", 'Return {"ok": true}.', timeout=180)
+                    return self._send(200, {"ok": True, "model": m or "(Claude Code 기본 모델)", "models": [], "changed": []})
                 if prov == "cursor":   # 모델 목록 대신 짧은 질문 하나로 확인. 모델은 비우면 Cursor 기본 모델
                     if not pv.find_cursor_cli():
                         return self._send(400, {"error": pv.cursor_missing_message(), "install": pv.CURSOR_INSTALL_WIN})

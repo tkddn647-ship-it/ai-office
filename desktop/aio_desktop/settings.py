@@ -35,8 +35,7 @@ DEFAULT = {
     },
     # 화면 입력을 다음 실행에도 남겨 둔다 (포트가 매번 바뀌어 브라우저 저장소를 못 쓰므로)
     "security": {"exposed": True, "data_level": 1},
-    "jaso": {"exp_dir": "", "company": "", "role": "", "jd": "", "company_info": "", "questions": [],
-             "target_ai": 2, "target_avg": 3.5, "max_rounds": 3},
+    "data_dir": "",   # 자소서 자료 폴더. 비우면 문서\AIOffice자소서
 }
 
 
@@ -53,6 +52,11 @@ def load_config() -> dict:
         except (OSError, json.JSONDecodeError):
             pass
     return cfg
+
+
+def data_dir(cfg: dict) -> str:
+    from .library import default_dir
+    return cfg.get("data_dir") or default_dir()
 
 
 def save_config(cfg: dict):

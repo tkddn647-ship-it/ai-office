@@ -6,12 +6,14 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aio_desktop import jaso, security       # noqa: E402
+from aio_desktop.library import Library, LibraryError  # noqa: E402
 from aio_desktop.workspace import Workspace  # noqa: E402
 
 ROLES = {r: {"provider": "mock", "model": "mock"} for r in ("planner", "builder", "reviewer", "advisor", "writer", "judge")}
@@ -102,31 +104,72 @@ class JasoTest(unittest.TestCase):
         self.assertIn("근거 표시 없는 문단 1", txt)
         self.assertIn("문항 [1, 2]", txt)
 
+    def test_library_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            lib = Library(d)
+            e1 = lib.exp_save(None, "로켓 추력", "| 기간 | [확인 필요: 기간] |\n로드셀 측정")
+            e2 = lib.exp_save(None, "레이싱카", "강화학습")
+            self.assertEqual((e1, e2), ("EXP-01", "EXP-02"))
+            lib.exp_save("EXP-01", "로켓 추력 측정", "고침")
+            ex = {x["id"]: x for x in lib.experiences()}
+            self.assertEqual(ex["EXP-01"]["title"], "로켓 추력 측정")
+            self.assertEqual(ex["EXP-01"]["unconfirmed"], 0)
+            self.assertEqual(ex["EXP-02"]["unconfirmed"], 0)
+            lib.exp_delete("EXP-02")
+            self.assertEqual([x["id"] for x in lib.experiences()], ["EXP-01"])
+            self.assertTrue(list((Path(d) / "_지운것").glob("*EXP-02*")))
+            name = lib.app_save({"company": "A사", "role": "SW 개발", "jd": "공고 원문", "questions": [{"text": "지원동기", "limit": 500}, {"text": ""}],
+                                 "answers": {"1": "[제목 1]\n본문 [EXP-01]"}})
+            a = lib.app_full(name)
+            self.assertEqual(len(a["questions"]), 1)
+            self.assertEqual(a["jd"], "공고 원문")
+            self.assertEqual((Path(d) / "applications" / name / "Q1.제출용.txt").read_text(encoding="utf-8"), "[제목 1]\n본문")
+            with self.assertRaises(LibraryError):
+                lib.app_read("../../x")
+
     def test_loop_until_pass_then_save(self):
         with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "EXP-01-로켓.md").write_text("로켓 추력 측정 기록", encoding="utf-8")
-            (Path(d) / "ai-office-jaso").mkdir()
-            (Path(d) / "ai-office-jaso" / "옛결과.md").write_text("이전 결과", encoding="utf-8")
+            lib = Library(d)
+            lib.exp_save(None, "로켓", "로켓 추력 측정 기록")
+            lib.exp_save(None, "다른 것", "쓰지 않을 경험")
+            name = lib.app_save({"company": "A", "role": "B", "jd": "공고", "defense": True, "exp_ids": ["EXP-01"],
+                                 "questions": [{"text": "지원동기", "limit": 300}], "max_rounds": 3})
             seen, ai_scores = [], iter([4, 4, 4, 4, 4, 1, 1, 1, 1, 1])
 
             def mock(system, user):
                 seen.append((system, user))
                 if "자기소개서를 함께 쓰는" in system:
-                    return json.dumps({"answers": [{"id": 1, "text": "[추력 12% 개선]\n측정했습니다. [EXP-01-로켓]"}]})
-                a = next(ai_scores)
-                return json.dumps({"questions": [{"id": 1, "score": 4, "ai": a}], "overall": ""})
+                    return json.dumps({"answers": [{"id": 1, "text": "[추력 12% 개선]\n측정했습니다. [EXP-01]"}]})
+                return json.dumps({"questions": [{"id": 1, "score": 4, "ai": next(ai_scores)}], "overall": ""})
             ev = []
-            run = jaso.JasoRun({"roles": ROLES}, {}, {"exp_dir": d, "company": "A", "role": "B", "jd": "공고",
-                                                      "questions": [{"text": "지원동기", "limit": 300}], "max_rounds": 3}, ev.append, mock=mock)
+            run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, ev.append, mock=mock)
             run.run()
             self.assertEqual(run.state, "waiting_approval", [e["text"] for e in ev])
             self.assertEqual(len(run.rounds), 2)          # 1차 AI 4점 → 수정 → 2차 통과
-            self.assertNotIn("이전 결과", seen[0][1])     # 저장한 결과물은 근거로 안 씀
-            final = [e for e in ev if e["kind"] == "final"][0]["final"]
-            self.assertEqual(final[1], "[추력 12% 개선]\n측정했습니다.")
+            self.assertNotIn("쓰지 않을 경험", seen[0][1])  # 고른 경험만 보냄
+            self.assertIn("방산 기업이다", seen[0][0])
+            final = [e for e in ev if e["kind"] == "final"][0]["answers"]
+            self.assertEqual(final["1"], "[추력 12% 개선]\n측정했습니다. [EXP-01]")
             run.approve()
-            outs = list((Path(d) / "ai-office-jaso").glob("*/Q1_제출용.txt"))
-            self.assertEqual(outs[0].read_text(encoding="utf-8"), "[추력 12% 개선]\n측정했습니다.")
+            self.assertEqual((Path(d) / "applications" / name / "Q1.제출용.txt").read_text(encoding="utf-8"), "[추력 12% 개선]\n측정했습니다.")
+            self.assertTrue(list((Path(d) / "applications" / name / "심사기록").glob("*.json")))
+
+    def test_review_only_does_not_rewrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            lib = Library(d)
+            lib.exp_save(None, "로켓", "기록")
+            name = lib.app_save({"company": "A", "questions": [{"text": "q", "limit": 300}], "answers": {"1": "[제목 1]\n내 글 [EXP-01]"}})
+            calls = []
+
+            def mock(system, user):
+                calls.append(system)
+                return json.dumps({"questions": [{"id": 1, "score": 2, "ai": 4}]})
+            run = jaso.JasoRun({"roles": ROLES}, {}, lib, name, lambda e: None, mock=mock, mode="review")
+            run.run()
+            self.assertEqual(run.state, "done")
+            self.assertEqual(len(calls), 5)                                 # 심사관 5명만
+            self.assertFalse(any("자기소개서를 함께 쓰는" in c for c in calls))
+            self.assertIn("내 글", lib.app_read(name)["answers"]["1"])
 
 
 class ServerModesTest(unittest.TestCase):
@@ -135,7 +178,7 @@ class ServerModesTest(unittest.TestCase):
             os.environ["APPDATA"] = appdata
             from aio_desktop import providers, server
             (Path(work) / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
-            (Path(exp) / "EXP-01.md").write_text("기록", encoding="utf-8")
+
             httpd = server.serve(0, mock=providers.demo_mock, fetch=fake_fetch)
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
@@ -158,19 +201,23 @@ class ServerModesTest(unittest.TestCase):
                     time.sleep(0.1)
                 return ev
 
-            call("/api/config", {"workspace": work, "roles": ROLES, "security": {"exposed": True, "data_level": 3},
-                                 "jaso": {"exp_dir": exp, "company": "회사", "questions": [{"text": "지원동기", "limit": 500}]}})
+            call("/api/config", {"workspace": work, "roles": ROLES, "security": {"exposed": True, "data_level": 3}, "data_dir": exp})
             self.assertEqual(call("/api/run", {"mode": "security"})[0], 200)
             ev = wait(("done", "failed"))
             self.assertEqual(ev["state"], "done", ev)
             self.assertTrue([e for e in ev["events"] if e["kind"] == "report"])
             self.assertIn("requests", call("/api/fix_task", {})[1]["task"])
             self.assertEqual(call("/api/approve", {})[0], 409)
-            self.assertEqual(call("/api/run", {"mode": "jaso"})[0], 200)
+            self.assertEqual(call("/api/exp/save", {"title": "로켓", "body": "기록"})[1]["id"], "EXP-01")
+            draft = call("/api/exp/organize", {"notes": "학회 로켓팀 추력 측정"})[1]
+            self.assertIn("[확인 필요", draft["body"])
+            self.assertEqual(len(call("/api/lib")[1]["experiences"]), 1)      # 초안은 저장 안 됨
+            name = call("/api/app/save", {"company": "회사", "role": "개발", "jd": "공고", "questions": [{"text": "지원동기", "limit": 500}]})[1]["name"]
+            self.assertEqual(call("/api/run", {"mode": "jaso", "app": name})[0], 200)
             ev = wait(("waiting_approval", "failed"))
             self.assertEqual(ev["state"], "waiting_approval", ev)
             self.assertEqual(call("/api/approve", {})[0], 200)
-            self.assertTrue(list(Path(exp).glob("ai-office-jaso/*/Q1_제출용.txt")))
+            self.assertTrue(call("/api/app?name=" + urllib.parse.quote(name))[1]["answers"]["1"])
             httpd.shutdown()
 
 

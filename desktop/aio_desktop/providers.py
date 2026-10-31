@@ -94,6 +94,9 @@ def demo_mock(system: str, user: str) -> str:
         items = [{"key": x.get("key"), "why": "가짜 AI 설명입니다.", "action": f"{x.get('fixed') or '고쳐진 버전'}으로 올리기",
                   "ticket": f"[보안] {x.get('package')} 업그레이드"} for x in json.loads(user)]
         return json.dumps({"items": items}, ensure_ascii=False)
+    if "경험 기록을 정리해" in system:
+        return json.dumps({"title": "데모 경험", "body": "# 데모 경험\n\n| 항목 | 내용 |\n|---|---|\n| 기간 | [확인 필요: 기간] |\n\n## 문제\n- "
+                           + user[:200].replace("\n", " ") + "\n\n## 결과\n- [확인 필요: 수치]\n"}, ensure_ascii=False)
     if "자기소개서를 함께 쓰는" in system:
         import re as _re
         ids = sorted({int(n) for n in _re.findall(r"^Q(\d+)\.", user, _re.M)}) or [1]

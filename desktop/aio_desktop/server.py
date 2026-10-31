@@ -9,10 +9,11 @@ import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import settings
-from .jaso import JasoRun
+from .jaso import JasoRun, organize_experience
+from .library import Library, LibraryError
 from .orchestrator import Run
 from .security import SecurityRun
 from .providers import PROVIDERS
@@ -59,6 +60,10 @@ def _browse() -> str:
         return ""
 
 
+def _lib() -> Library:
+    return Library(settings.data_dir(settings.load_config()))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "AIOfficeDesktop"
 
@@ -101,6 +106,17 @@ class Handler(BaseHTTPRequestHandler):
             keys = settings.get_keys()
             return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in PROVIDERS if p != "mock"},
                                     "providers": PROVIDERS, "key_store": settings.key_store()})
+        q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        try:
+            if path == "/api/lib":
+                lib = _lib()
+                return self._send(200, {"dir": str(lib.root), "experiences": lib.experiences(), "apps": lib.apps()})
+            if path == "/api/exp":
+                return self._send(200, {"id": q.get("id"), "body": _lib().exp_read(q.get("id", ""))})
+            if path == "/api/app":
+                return self._send(200, _lib().app_full(q.get("name", "")))
+        except LibraryError as e:
+            return self._send(400, {"error": str(e)})
         if path == "/api/events":
             since = int((urlparse(self.path).query.split("since=") + ["0"])[1].split("&")[0] or 0)
             with State.lock:
@@ -122,10 +138,10 @@ class Handler(BaseHTTPRequestHandler):
         b = self._body()
         if path == "/api/config":
             cfg = settings.load_config()
-            for k in ("workspace", "test_command", "lang", "max_tasks", "max_fix_rounds", "max_calls"):
+            for k in ("workspace", "test_command", "lang", "max_tasks", "max_fix_rounds", "max_calls", "data_dir"):
                 if k in b:
                     cfg[k] = b[k]
-            for k in ("security", "jaso"):
+            for k in ("security",):
                 if isinstance(b.get(k), dict):
                     cfg[k] = {**cfg.get(k, {}), **b[k]}
             for role, v in (b.get("roles") or {}).items():
@@ -138,6 +154,23 @@ class Handler(BaseHTTPRequestHandler):
                 elif val:
                     settings.set_key(prov, val.strip())
             return self._send(200, {"ok": True})
+        try:
+            if path == "/api/exp/save":
+                return self._send(200, {"id": _lib().exp_save(b.get("id") or None, b.get("title", ""), b.get("body", ""))})
+            if path == "/api/exp/delete":
+                _lib().exp_delete(b.get("id", ""))
+                return self._send(200, {"ok": True})
+            if path == "/api/exp/organize":
+                if not (b.get("notes") or "").strip():
+                    return self._send(400, {"error": "메모를 적어 주세요"})
+                return self._send(200, organize_experience(settings.load_config(), settings.get_keys(), b["notes"],
+                                                           mock=getattr(self.server, "mock", None)))
+            if path == "/api/app/save":
+                return self._send(200, {"name": _lib().app_save(b)})
+        except LibraryError as e:
+            return self._send(400, {"error": str(e)})
+        except Exception as e:   # noqa: BLE001  AI 호출 실패 등
+            return self._send(502, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/browse":
             return self._send(200, {"path": _browse()})
         if path == "/api/run":
@@ -159,14 +192,13 @@ class Handler(BaseHTTPRequestHandler):
                     run = SecurityRun(cfg, keys, cfg.get("security") or {}, _push, mock=mock,
                                       **({"fetch": self.server.fetch} if getattr(self.server, "fetch", None) else {}))
                 elif mode == "jaso":
-                    opts = cfg.get("jaso") or {}
-                    if not opts.get("exp_dir"):
-                        return self._send(400, {"error": "경험 기록 폴더를 골라 주세요"})
-                    first = f"{opts.get('company', '')} {opts.get('role', '')} 자소서 작성을 시작합니다."
-                    run = JasoRun(cfg, keys, opts, _push, mock=mock)
+                    name = b.get("app") or ""
+                    jm = "review" if b.get("jaso_mode") == "review" else "write"
+                    run = JasoRun(cfg, keys, _lib(), name, _push, mock=mock, mode=jm)
+                    first = f"{name} " + ("심사만 합니다 (글은 고치지 않음)." if jm == "review" else "자소서 작성을 시작합니다.")
                 else:
                     return self._send(400, {"error": "모르는 모드"})
-            except WorkspaceError as e:
+            except (WorkspaceError, LibraryError) as e:
                 return self._send(400, {"error": str(e)})
             with State.lock:
                 State.events = []

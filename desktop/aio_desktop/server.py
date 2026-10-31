@@ -46,6 +46,15 @@ def _push(ev: dict):
         State.events.append(ev)
 
 
+def _static(name: str) -> bytes:
+    import sys
+    from pathlib import Path
+    frozen = getattr(sys, "_MEIPASS", None)
+    if frozen and (Path(frozen) / "aio_desktop/static" / name).exists():
+        return (Path(frozen) / "aio_desktop/static" / name).read_bytes()
+    return resources.files("aio_desktop").joinpath("static/" + name).read_bytes()
+
+
 def _page() -> bytes:
     import sys
     from pathlib import Path
@@ -153,6 +162,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/":
             return self._send(200, _page(), "text/html; charset=utf-8")
+        if path == "/icon.png":
+            return self._send(200, _static("icon.png"), "image/png")
         if not self._auth():
             return
         if path == "/api/config":
@@ -179,7 +190,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, a)
         except LibraryError as e:
             return self._send(400, {"error": str(e)})
+        if path == "/api/ping":
+            return self._send(200, {"ok": True})
         if path == "/api/events":
+            lt = getattr(self.server, "lifetime", None)
+            if lt:
+                lt.seen()
             since = int((urlparse(self.path).query.split("since=") + ["0"])[1].split("&")[0] or 0)
             with State.lock:
                 evs = State.events[since:]
@@ -197,6 +213,13 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._host_ok():
             return
+        if path == "/api/bye":          # 창을 닫을 때 브라우저가 보내는 신호 (sendBeacon은 헤더를 못 붙여 본문에 토큰)
+            n = min(int(self.headers.get("content-length") or 0), 200)
+            tok = self.rfile.read(n).decode("utf-8", "replace").strip()
+            lt = getattr(self.server, "lifetime", None)
+            if lt and hmac.compare_digest(tok.encode(), TOKEN.encode()):
+                lt.bye()
+            return self._send(204, b"", "text/plain")
         if not self._auth():
             return
         try:
@@ -296,6 +319,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(409, {"error": "저장할 결과가 없습니다. 닫기를 눌러 주세요"})
             msg =r.approve() if path == "/api/approve" else r.discard()
             return self._send(200, {"ok": True, "message": msg})
+        if path == "/api/quit":
+            lt = getattr(self.server, "lifetime", None)
+            if State.run and State.run.state == "running":
+                return self._send(409, {"error": "AI 작업이 돌고 있습니다. 멈춤을 누른 뒤 종료하세요"})
+            if lt:
+                lt.quit.set()
+            return self._send(200, {"ok": True})
         if path == "/api/stop":
             if State.run:
                 State.run.stop_flag.set()

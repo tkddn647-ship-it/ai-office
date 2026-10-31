@@ -7,14 +7,18 @@
 GitHub 버전 AI Office와 같은 원칙으로, 서버 없이 Windows 프로그램 하나로 동작합니다.
 
 ## 시작하기
-1. 릴리스에서 `AIOfficeDesktop.exe`를 받아 실행합니다. 검은 창이 뜨고 브라우저에 화면이 열립니다. 검은 창을 닫으면 프로그램이 끝납니다.
+1. 릴리스에서 **`AIOfficeDesktop-Setup.exe`**(설치 파일)를 받아 실행합니다. 관리자 권한 없이 내 계정에만 설치되고, 시작 메뉴와 (선택) 바탕화면에 바로 가기가 생깁니다.
+   - 설치 없이 쓰려면 `AIOfficeDesktop.exe` 하나만 받아 실행해도 됩니다.
    - 서명되지 않은 프로그램이라 처음 실행할 때 Windows SmartScreen 경고가 뜰 수 있습니다. "추가 정보 → 실행"을 누르세요.
-2. 왼쪽에서 **작업 폴더**를 고르고, 필요하면 **테스트 명령**을 적습니다. 예: `python -m pytest -q`, `npm test`
-3. **역할별 AI**를 고릅니다. 팀장·개발·리뷰마다 OpenAI, Anthropic, Google Gemini 중 하나와 모델 이름을 정합니다.
-4. 쓰는 회사의 **API 키**를 넣고 저장합니다.
-5. 아래 칸에 할 일을 적고 **시작**을 누릅니다.
+2. **전용 앱 창**이 뜹니다. Windows에 기본으로 깔린 Microsoft Edge의 앱 모드로 열리며, 주소창·탭이 없고 평소 쓰는 브라우저와 로그인·확장 프로그램이 섞이지 않습니다. Edge·Chrome이 없으면 기본 브라우저 탭으로 엽니다.
+   - 창을 닫으면 프로그램도 끝납니다. AI 작업이 돌고 있으면 끝난 뒤에 종료합니다. 왼쪽 아래 **프로그램 종료** 버튼도 있습니다.
+   - 이미 켜져 있을 때 다시 실행하면 같은 프로그램의 창을 하나 더 엽니다.
+   - 오류 기록: `%APPDATA%\AIOfficeDesktop\log.txt`
+3. 맨 위 탭에서 **코드 작업 / 보안 점검 / 자소서**를 고르고, 왼쪽에서 역할별 AI와 API 키를 넣습니다.
 
-키 없이 흐름만 보려면 세 역할 모두 "테스트용 가짜 AI"를 고르세요. 작업 폴더에 `AI_OFFICE_DEMO.md` 하나를 만들었다가, 버리기를 누르면 지웁니다.
+키 없이 흐름만 보려면 역할 AI를 모두 "테스트용 가짜 AI"로 고르세요.
+
+**지우기**: Windows 설정 → 앱에서 AI Office Desktop 제거. 설정·키(`%APPDATA%\AIOfficeDesktop`, 자격 증명 관리자)와 자료 폴더(`문서\AIOffice자소서`)는 남습니다. 완전히 지우려면 두 폴더와 자격 증명 관리자의 `AIOfficeDesktop` 항목을 직접 지우세요.
 
 ## 흐름
 | 단계 | 하는 일 |
@@ -146,6 +150,7 @@ for_office 저장소 폴더를 자료 폴더로 고르면 기존 `experiences/` 
 cd desktop
 pip install pyinstaller -r requirements.txt
 python -m unittest -v tests/test_desktop.py tests/test_modes.py
-pyinstaller --onefile --name AIOfficeDesktop --add-data "aio_desktop/static;aio_desktop/static" --hidden-import keyring.backends.Windows run.py
+pyinstaller --onefile --windowed --icon app.ico --name AIOfficeDesktop --version-file version_info.txt --add-data "aio_desktop/static;aio_desktop/static" --hidden-import keyring.backends.Windows run.py
+iscc installer.iss          # 설치 파일 (Inno Setup 6)
 ```
-소스로 바로 실행: `python -m aio_desktop` (desktop 폴더에서)
+소스로 바로 실행: `python -m aio_desktop` (desktop 폴더에서). 평소 브라우저 탭으로 열려면 `--browser`.

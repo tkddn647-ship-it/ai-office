@@ -172,5 +172,38 @@ class ServerTest(unittest.TestCase):
             httpd.shutdown()
 
 
+class LifetimeTest(unittest.TestCase):
+    def test_close_waits_for_running_job(self):
+        from aio_desktop import window
+        window.BYE_GRACE, window.IDLE_EXIT = 0.5, 100
+        stopped = threading.Event()
+
+        class FakeHttpd:
+            def shutdown(self):
+                stopped.set()
+        busy = {"v": True}
+        life = window.Lifetime(FakeHttpd(), busy=lambda: busy["v"])
+        life.seen()
+        time.sleep(0.05)
+        life.bye()                                   # 창 닫힘
+        time.sleep(2.5)
+        self.assertFalse(stopped.is_set())           # 작업 중이면 안 끝남
+        busy["v"] = False
+        self.assertTrue(stopped.wait(3))             # 작업이 끝나면 종료
+
+    def test_reload_is_not_close(self):
+        from aio_desktop import window
+        window.BYE_GRACE, window.IDLE_EXIT = 1.0, 100
+        stopped = threading.Event()
+
+        class FakeHttpd:
+            def shutdown(self):
+                stopped.set()
+        life = window.Lifetime(FakeHttpd(), busy=lambda: False)
+        life.seen(); life.bye(); time.sleep(0.3); life.seen()   # 새로고침: 닫힘 신호 뒤 바로 다시 요청
+        self.assertFalse(stopped.wait(2.5))
+        life.quit.set()
+
+
 if __name__ == "__main__":
     unittest.main()

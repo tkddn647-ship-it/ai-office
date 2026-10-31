@@ -230,6 +230,91 @@ def make_repo(root: Path):
     (root / "final" / "A사-개발" / "Q1.md").write_text("[최종 1]\n최종본 [EXP-01] [JD]", encoding="utf-8")
     (root / "jd" / "A사").mkdir(parents=True)
     (root / "jd" / "A사" / "공고.md").write_text("담당업무: 개발", encoding="utf-8")
+    (root / "guides" / "sources").mkdir(parents=True)
+    (root / "guides" / "G1-방산.md").write_text(G1, encoding="utf-8")
+    (root / "guides" / "G2-현대차.md").write_text(G2, encoding="utf-8")
+    (root / "guides" / "sources" / "examples.txt").write_text(EXAMPLES, encoding="utf-8")
+    (root / "guides" / "sources" / "G1-원본.pdf").write_bytes(b"%PDF")
+
+
+G1 = """# G1
+## 1. 경험 고르기·쓰기
+- 트러블슈팅 중심 [G1 p.80]
+## 2. 방산 어필 = 같은 경험을 '방산 관점'으로 [G1 p.81-83]
+- 멈추지 않는 시스템
+## 5. 글쓰기 원칙
+- 두괄식 [G1 p.86]
+## 6. 항목별 구조 (강의 예시에서 뽑은 뼈대)
+- 도전: 첫 문장에 결과
+### ⚠ 예시를 그대로 따라 하면 안 되는 부분 (강의 규칙과 충돌)
+- 다짐형 맺음
+## 8. 퇴고 체크 [G1 p.96]
+- 첫 문장만 봐도
+"""
+G2 = """# G2
+## 1. 대원칙: 면접에서 공격받지 않는 자소서 [G2 p.41]
+- 답할 수 있는 것만
+## 2. 문항 유형별 작성법
+### 지원동기 (+ 입사 후 꿈·성장) [G2 p.28-32]
+- JD 재해석이 절반 [p.29]
+### 직무역량 [G2 p.43]
+- 전문 용어로
+### 강점·약점 [G2 p.44]
+- 꼼꼼함 금지
+## 4. JD 읽는 법 [G2 p.34-40]
+- 현업 용어
+"""
+EXAMPLES = "# 예시\n## G2 p.45\n저는 이 목표를 달성하기 위해 기술적 성장과 비즈니스 수익성을 통합 관리하는 전략적 PM으로 기여하고자 지원했습니다.\n"
+
+
+class GuideTest(unittest.TestCase):
+    def test_plan_and_copy(self):
+        from aio_desktop.guides import Guides, qtype
+        with tempfile.TemporaryDirectory() as d:
+            make_repo(Path(d))
+            g = Guides(d)
+            qs = [{"id": 1, "title": "지원동기", "text": "입사 후 포부"}, {"id": 2, "title": "", "text": "본인의 장점과 약점"},
+                  {"id": 3, "title": "도전", "text": "도전 경험을 쓰시오"}]
+            p = g.plan(qs, defense=True)
+            self.assertEqual([p["per_q"][i]["type"] for i in (1, 2, 3)], ["motivation", "strengths", "experience"])
+            self.assertIn("G2 지원동기 (+ 입사 후 꿈·성장)", p["per_q"][1]["sections"])
+            self.assertIn("G2 4. JD 읽는 법", p["per_q"][1]["sections"])
+            self.assertIn("G1 ⚠ 예시를 그대로 따라 하면 안 되는 부분 (강의 규칙과 충돌)", p["per_q"][3]["sections"])
+            self.assertIn("G1 2. 방산 어필 = 같은 경험을 '방산 관점'으로", p["per_q"][2]["sections"])   # 방산이면 모든 문항
+            self.assertNotIn("방산 어필", g.plan(qs, defense=False)["text"])
+            self.assertEqual(qtype({"title": "단점 / 약점 / 극복 경험", "text": ""}), "strengths")
+            hit = g.copied("[제목 1]\n그래서 저는 이 목표를 달성하기 위해 기술적 성장과 비즈니스 수익성을 함께 봅니다.")
+            self.assertEqual(hit[0][1], "G2 p.45")
+            self.assertEqual(g.copied("[제목 1]\n저는 로드셀로 추력을 직접 쟀습니다."), [])
+
+    def test_guides_reach_writer_and_rule_check(self):
+        from aio_desktop import importer
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+            make_repo(Path(src))
+            lib = Library(data)
+            rep = importer.apply(lib, importer.read_source("folder", src))
+            self.assertEqual(sorted(rep["guide_new"]), ["G1-방산.md", "G2-현대차.md", "examples.txt"])
+            self.assertFalse((Path(data) / "guides" / "sources" / "G1-원본.pdf").exists())     # PDF는 안 가져옴
+            seen = []
+
+            def mock(system, user):
+                seen.append((system, user))
+                if "자기소개서를 함께 쓰는" in system:
+                    return json.dumps({"answers": [
+                        {"id": 1, "text": "[매출 3배]\n저는 이 목표를 달성하기 위해 기술적 성장과 비즈니스 수익성을 통합 관리합니다. [EXP-01]"},
+                        {"id": 2, "text": "[측정 3회]\n로드셀로 쟀습니다. [EXP-02]"}]})
+                return json.dumps({"questions": [{"id": 1, "score": 4, "ai": 1}, {"id": 2, "score": 4, "ai": 1}]})
+            run = jaso.JasoRun({"roles": ROLES}, {}, lib, "A사-개발", lambda e: None, mock=mock, mode="write")
+            run.app["max_rounds"] = 1
+            run.run()
+            w = seen[0][1]
+            self.assertIn("Q1: 유형 '지원동기·입사 후 포부' → 따를 절: G2 지원동기", w)
+            self.assertIn("JD 재해석이 절반", w)
+            self.assertNotIn("기술적 성장과 비즈니스", w)                 # 예시 원문은 AI에 보내지 않음
+            self.assertIn("가이드 위반을 지적할 때는", seen[1][0])          # 심사관도 가이드 기준
+            errs = run.rounds[0]["mech"]["errors"]
+            self.assertTrue(any("강의 예시와 20자 이상 같음 (G2 p.45)" in e for e in errs), errs)
+            self.assertFalse(run.rounds[0]["ok"])
 
 
 class ImportTest(unittest.TestCase):

@@ -126,7 +126,10 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
       </div>
       <div id="g_local" style="display:none"><label>경로</label><div class="row"><input id="g_path"><button class="ghost" style="flex:none" onclick="impBrowse()">찾기</button></div></div>
       <div class="row" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_exp" checked style="width:auto"> 경험·활동</label>
-        <label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_app" checked style="width:auto"> 지원서·공고·답</label></div>
+        <label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_app" checked style="width:auto"> 지원서·공고·답</label>
+        <label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_guide" checked style="width:auto"> 작성 가이드</label></div>
+      <div class="hint">작성 가이드 = for_office의 <b>guides/</b> 특강 정리본(G1·G2). 문항 유형에 맞는 절을 골라 작성·심사에 쓰고, <b>guides/sources/examples.txt</b>가 있으면 강의 예시 베끼기 검사도 합니다. 가이드는 이 프로그램에 들어 있지 않고 내 자료 폴더에서만 읽습니다.</div>
+      <div id="g_have" class="hint"></div>
       <button onclick="impRun()" style="margin-top:8px">가져오기</button>
       <pre id="g_result" class="hint" style="white-space:pre-wrap"></pre>
     </section>
@@ -151,7 +154,7 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
       <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="a_defense" style="width:auto"> 방산 기업 (신뢰성·예외 처리·규격 중심으로 씀)</label>
       <label>회사 공고 원문 (담당업무·자격요건·우대사항 그대로 붙여 넣기)</label><textarea id="a_jd" style="height:120px"></textarea>
       <label>회사 정보 (기사·홈페이지 등 출처 있는 것만, 선택)</label><textarea id="a_info" style="height:60px"></textarea>
-      <label>자소서 항목</label><div id="a_qs"></div>
+      <label>자소서 항목</label><div class="hint" id="a_guides"></div><div id="a_qs"></div>
       <button class="ghost" onclick="addQ()">항목 추가</button>
       <label>근거로 쓸 경험</label><div id="a_exps" class="chips"></div>
       <div class="row"><div><label>AI 의심 목표 (이하)</label><input id="a_ai" type="number" min="0" max="5" step="0.5"></div>
@@ -362,7 +365,7 @@ async function impRun(auto){
       if(tok){ await api("/api/config",{keys:{github:tok}}); document.getElementById("g_token").value=""; document.getElementById("g_tokset").textContent="● 저장됨"; }
       body={kind:k,value:k==="github"?document.getElementById("g_repo").value.trim():document.getElementById("g_path").value.trim(),
         branch:document.getElementById("g_branch").value.trim()||"main",auto:document.getElementById("g_auto").checked,
-        what:[...(document.getElementById("g_exp").checked?["exp"]:[]),...(document.getElementById("g_app").checked?["app"]:[])]};
+        what:[...(document.getElementById("g_exp").checked?["exp"]:[]),...(document.getElementById("g_app").checked?["app"]:[]),...(document.getElementById("g_guide").checked?["guide"]:[])]};
       out.textContent="가져오는 중…"; }
     const r=await api("/api/import",body); if(r.not_run) return;
     out.textContent=(auto?"켤 때 자동으로 가져왔습니다.\n":"")+r.text;
@@ -372,6 +375,8 @@ async function impRun(auto){
 }
 async function libLoad(keep){
   try{ LIB=await api("/api/lib"); }catch(e){ return alertBox(e.message) }
+  const gs=LIB.guides||{files:[]}; const gtxt=gs.files.length?`작성 가이드: ${gs.files.join(", ")} (절 ${gs.sections}개) · 베끼기 검사 ${gs.examples?"켜짐":"꺼짐 (examples.txt 없음)"}`:"작성 가이드 없음: 기본 규칙만 적용합니다. 가져오기에서 '작성 가이드'를 체크해 가져오세요.";
+  document.getElementById("g_have").textContent=gtxt; document.getElementById("a_guides").textContent=gtxt;
   const L=document.getElementById("explist"); L.innerHTML="";
   LIB.experiences.forEach(x=>L.append(el("button",{className:"chip"+(x.id===CUR_EXP?" on":""),textContent:`${x.id} ${x.title}`+(x.unconfirmed?` · 확인 필요 ${x.unconfirmed}`:""),dataset:{id:x.id},onclick:()=>expOpen(x.id)})));
   if(!LIB.experiences.length) L.append(el("span",{className:"hint",textContent:"아직 경험이 없습니다. 아래 양식에 적고 저장하세요. 저장 위치: "+LIB.dir}));
@@ -434,7 +439,11 @@ async function appLoad(name){ if(!name) return appNew(); const a=await api("/api
   set("a_company",a.company||""); set("a_role",a.role||""); set("a_deadline",a.deadline||""); set("a_jd",a.jd||""); set("a_info",a.company_info||"");
   document.getElementById("a_defense").checked=!!a.defense; set("a_ai",a.target_ai??2); set("a_avg",a.target_avg??3.5); set("a_rounds",a.max_rounds??3);
   document.getElementById("a_qs").innerHTML=""; document.getElementById("a_answers").innerHTML="";
-  (a.questions||[]).forEach(q=>document.getElementById("a_qs").append(qRow(q))); calls(); renderExpPick(a.exp_ids||[]); renderAnswers(a.answers||{}); }
+  (a.questions||[]).forEach(q=>document.getElementById("a_qs").append(qRow(q))); calls(); renderExpPick(a.exp_ids||[]); renderAnswers(a.answers||{});
+  showPlan(a.guide_plan||{}); }
+function showPlan(plan){ document.querySelectorAll("#a_qs .q").forEach((b,i)=>{ const p=plan[String(i+1)]; let d=b.querySelector(".gplan");
+  if(!d){ d=el("div",{className:"hint gplan"}); b.append(d); }
+  d.textContent=p?`유형: ${p.type_name}`+(p.sections.length?` · 따를 가이드: ${p.sections.join(" / ")}`:""):""; }); }
 function qList(all){ return [...document.querySelectorAll("#a_qs .q")].map(b=>({title:b.querySelector(".qn").value.trim(),text:b.querySelector(".qt").value.trim(),
   limit:parseInt(b.querySelector(".ql").value||"1000"),count:b.querySelector(".qc").value})).filter(q=>all||q.text); }
 function subText(t){ t=(t||"").trim(); const i=t.indexOf("\n"); const first=(i<0?t:t.slice(0,i)).trim();

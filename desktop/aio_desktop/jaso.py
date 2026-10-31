@@ -38,6 +38,9 @@ WRITER = """너는 신입 지원자의 자기소개서를 함께 쓰는 사람�
 - 수필이 아니라 보고서처럼. 미사여구·다짐형 수식어·글자수 채우기 문장 금지. 전문용어는 비전공 인사담당도 흐름을 따라올 수 있게.{defense}
 - 소리 내어 읽었을 때 사람이 쓴 말처럼 자연스럽게. 문단마다 같은 틀, 교훈·다짐형 끝맺음, 연결어 남발을 피한다.
 답은 JSON 하나만: {{"answers": [{{"id": 문항번호, "text": "소제목 줄 + 본문(근거 표시 포함)"}}], "note": "확인이 필요한 점 한두 줄"}}
+- 아래 '작성 가이드'가 있으면 문항마다 '따를 가이드 절'의 구조·원칙을 적용한다. 가이드는 쓰는 방법의 근거일 뿐 경험·수치·회사 정보의 근거가 아니다.
+  가이드와 이 규칙이 다르면 이 규칙이 우선이다 (소제목 필수, 다짐형 맺음 금지, 같은 경험 중복 금지). 가이드에 적힌 '따라 하면 안 되는 부분'은 따르지 않는다.
+  강의 예시 문장을 베끼지 않는다 (공백·문장부호를 뺀 20자 이상 같으면 탈락 처리). 강의 슬라이드의 시장 수치를 회사 정보로 쓰지 않는다.
 모든 글은 {lang}로."""
 
 DEFENSE = """
@@ -63,7 +66,9 @@ COMMON = """너는 서류 심사 패널 중 한 명이다. 아래 '너의 역할
 - 판단에 자신이 없으면 "확실하지 않음"이라고 쓴다.
 답은 JSON 하나만:
 {"questions": [{"id": 1, "verdict": "통과|보류|탈락", "score": 1~5, "points": ["\\"인용\\" → 문제"], "fix": "고칠 방향 한 줄"%s}], "overall": "한두 문장"%s}
-score: 5=이 문항만으로 서류 통과, 4=통과 쪽, 3=애매, 2=감점 큼, 1=탈락 사유. 모든 문항에 답한다. 한국어로."""
+score: 5=이 문항만으로 서류 통과, 4=통과 쪽, 3=애매, 2=감점 큼, 1=탈락 사유. 모든 문항에 답한다. 한국어로.
+'작성 가이드'가 있으면 문항마다 '따를 가이드 절' 기준으로도 본다. 가이드 위반을 지적할 때는 근거 쪽을 [G2 p.28]처럼 붙인다.
+가이드와 '규칙'이 다르면 규칙이 우선이다 (예: 소제목 필수). 가이드 예시를 정답으로 보지 않는다."""
 
 JUDGES = [
     ("hr", "인사담당 (1차 서류)", """하루에 수백 장을 훑는 인사 담당자. 기술 용어를 잘 모른다. 설명 없이 용어만 이어져 이해가 안 되는 문장은 인용해서 지적한다. 기준:
@@ -205,7 +210,7 @@ def count(text: str, mode: str) -> int:
     return len(text)
 
 
-def mech_check(answers: dict[int, str], questions: list[dict], exp_ids: set[str]) -> dict:
+def mech_check(answers: dict[int, str], questions: list[dict], exp_ids: set[str], guides=None) -> dict:
     """규칙으로만 하는 점검. 반환: {errors: [...], warnings: [...], per_q: {id: {...}}}"""
     errors, warnings, per_q, used = [], [], {}, {}
     full = "\n".join(answers.values())
@@ -243,6 +248,9 @@ def mech_check(answers: dict[int, str], questions: list[dict], exp_ids: set[str]
             warnings.append(f"Q{qid} 근거 표시 없는 문단 {untagged}개")
         for t in tags:
             used.setdefault(t, set()).add(qid)
+        if guides is not None:
+            for frag, src in guides.copied(clean):
+                errors.append(f"Q{qid} 강의 예시와 20자 이상 같음 ({src}): \"{frag[:40]}…\"")
         per_q[qid] = info
     for t, qs in used.items():
         if len(qs) >= 2:
@@ -262,6 +270,8 @@ class JasoRun:
         self.cfg, self.keys, self.lib, self.on_event, self.mock, self.mode = cfg, keys, lib, on_event, mock, mode
         self.app_name = app_name
         self.app = lib.app_full(app_name)
+        from .guides import Guides
+        self.guides = Guides(lib.root)
         self.questions = self.app.get("questions") or []
         self.state = "running"
         self.best = None
@@ -286,9 +296,17 @@ class JasoRun:
         q = "\n".join(f"Q{x['id']}. {x.get('title') + ' — ' if x.get('title') else ''}{x['text']} "
                       f"({x['limit']}{'바이트' if x['count'] == 'bytes' else '자'}, {'공백 제외' if x['count'] == 'without_spaces' else '공백 포함'})"
                       for x in self.questions)
+        self.gplan = self.guides.plan(self.questions, bool(a.get("defense")))
+        gp = self.gplan
+        if gp["text"]:
+            per = "\n".join(f"Q{k}: 유형 '{v['type_name']}' → 따를 절: {', '.join(v['sections']) or '전체'}" for k, v in gp["per_q"].items())
+            guide = (f"# 작성 가이드 (취업 특강 정리본. 쓰는 방법의 근거일 뿐, 경험·수치·회사 정보의 근거가 아님)\n"
+                     f"## 문항별로 따를 절\n{per}\n\n## 가이드 본문\n{gp['text']}")
+        else:
+            guide = "# 작성 가이드\n(없음 — 기본 규칙만 적용)"
         mat = (f"# 지원\n{a.get('company', '')} / {a.get('role', '')}{' · 방산 기업' if a.get('defense') else ''}\n\n"
                f"# 공고\n{a.get('jd', '') or '(없음)'}\n\n# 회사 정보\n{a.get('company_info', '') or '(없음)'}\n\n"
-               f"# 문항\n{q}\n\n# 경험 기록\n{exp[:90000]}")
+               f"# 문항\n{q}\n\n{guide}\n\n# 경험 기록\n{exp[:90000]}")
         return mat, ids
 
     def _shown(self, answers, mech):
@@ -369,6 +387,13 @@ class JasoRun:
             unconf = [e["id"] for e in self.lib.experiences() if e["id"] in ids and e["unconfirmed"]]
             self.emit("system", f"경험 {len(ids)}개({', '.join(sorted(ids))})를 근거로 씁니다. 공고·경험 내용은 고른 AI 회사로 전송됩니다."
                       + (f"\n{', '.join(unconf)}에는 아직 [확인 필요]가 남아 있어, 그 부분은 사실로 쓰지 않습니다." if unconf else ""), "info")
+            gp = self.gplan
+            if gp["text"]:
+                self.emit("system", "작성 가이드를 적용합니다" + (" (방산 기업: G1 방산 절 포함)" if a.get("defense") else "") + "\n"
+                          + "\n".join(f"Q{k} {v['type_name']}: {', '.join(v['sections'][:3])}{' 외' if len(v['sections']) > 3 else ''}" for k, v in gp["per_q"].items())
+                          + ("\n강의 예시 베끼기 검사: 켜짐" if self.guides.grams else "\n강의 예시 원문(examples.txt)이 없어 베끼기 검사는 건너뜁니다."), "info")
+            else:
+                self.emit("system", "자료 폴더에 작성 가이드(guides/)가 없어 기본 규칙만 적용합니다. ⓪ 가져오기에서 for_office를 가져오면 G1·G2 가이드도 함께 들어옵니다.", "info")
 
             if self.mode in ("screen", "aicheck"):
                 answers = {q["id"]: a["answers"].get(str(q["id"]), "") for q in self.questions}
@@ -382,7 +407,7 @@ class JasoRun:
                 self.emit("writer", "초안을 썼습니다." + (f"\n확인할 점: {d.get('note')}" if d.get("note") else ""), "chat")
 
             for rnd in range(1, max_rounds + 1):
-                mech = mech_check(answers, self.questions, ids)
+                mech = mech_check(answers, self.questions, ids, self.guides)
                 pnl = self.panel(answers, mat, mech) if self.mode in ("write", "screen") else {}
                 det = self.detect(answers, mat, mech) if self.mode in ("write", "aicheck") else None
                 summ = self.summarize(pnl, self.questions, det)

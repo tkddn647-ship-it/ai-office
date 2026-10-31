@@ -9,6 +9,7 @@
 - experiences/EXP-NN-*.md  → 그대로 (파일 이름 유지)
 - applications/<폴더>/questions.yaml (+ final/<폴더>/ 또는 applications/<폴더>/의 Q*.md)
   + jd/<회사>/공고.md, 회사정보.md → 이 프로그램의 지원서 형식으로
+- guides/*.md (특강 정리본), guides/sources/examples.txt (베끼기 검사용 예시 원문). PDF 원본은 가져오지 않는다.
 - _template, _검사-*, README 는 건너뛴다.
 
 안전
@@ -36,7 +37,7 @@ from .library import EXP_RE, Library, _slug
 
 MAX_FILE = 2 * 1024 * 1024
 MAX_TOTAL = 50 * 1024 * 1024
-WANT = re.compile(r"^(experiences/EXP-\d+[^/]*\.md|(applications|final)/[^/_][^/]*/(questions\.yaml|Q\d+\.md)|jd/[^/_][^/]*/(공고|회사정보)\.md)$")
+WANT = re.compile(r"^(guides/[^/]+\.md|guides/sources/examples\.txt|experiences/EXP-\d+[^/]*\.md|(applications|final)/[^/_][^/]*/(questions\.yaml|Q\d+\.md)|jd/[^/_][^/]*/(공고|회사정보)\.md)$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -85,7 +86,7 @@ def _from_zip(data: bytes) -> dict[str, bytes]:
 def _from_dir(root: Path) -> dict[str, bytes]:
     out, total = {}, 0
     root = root.resolve()
-    for top in ("experiences", "applications", "final", "jd"):
+    for top in ("experiences", "applications", "final", "jd", "guides"):
         base = root / top
         if not base.is_dir():
             continue
@@ -146,11 +147,11 @@ def _txt(b: bytes) -> str:
     return b.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
-def apply(lib: Library, files: dict[str, bytes], what: tuple[str, ...] = ("exp", "app"), source: str = "") -> dict:
+def apply(lib: Library, files: dict[str, bytes], what: tuple[str, ...] = ("exp", "app", "guide"), source: str = "") -> dict:
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = lib.root / "_백업" / stamp
     rep = {"exp_new": [], "exp_updated": [], "exp_same": 0, "app_new": [], "app_updated": [], "app_same": 0,
-           "skipped": [], "backup": ""}
+           "guide_new": [], "guide_updated": [], "guide_same": 0, "skipped": [], "backup": ""}
 
     def back(p: Path):
         dst = backup / p.relative_to(lib.root)
@@ -180,6 +181,26 @@ def apply(lib: Library, files: dict[str, bytes], what: tuple[str, ...] = ("exp",
                 rep["exp_updated"].append(eid)
             else:
                 rep["exp_new"].append(eid)
+            dst.write_text(text, encoding="utf-8")
+
+    if "guide" in what:
+        for rel, b in sorted(files.items()):
+            if not rel.startswith("guides/"):
+                continue
+            name = rel.split("/")[-1]
+            if "/" in name or name.startswith(".") or name.lower() == "readme.md":
+                continue
+            dst = lib.root / ("guides/sources" if rel.startswith("guides/sources/") else "guides") / name
+            text = _txt(b)
+            if dst.exists():
+                if dst.read_text(encoding="utf-8", errors="replace") == text:
+                    rep["guide_same"] += 1
+                    continue
+                back(dst)
+                rep["guide_updated"].append(name)
+            else:
+                rep["guide_new"].append(name)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(text, encoding="utf-8")
 
     if "app" in what:
@@ -231,7 +252,8 @@ def apply(lib: Library, files: dict[str, bytes], what: tuple[str, ...] = ("exp",
 
 def summary_text(rep: dict) -> str:
     L = [f"경험: 새로 {len(rep['exp_new'])}개, 바뀜 {len(rep['exp_updated'])}개, 같음 {rep['exp_same']}개",
-         f"지원서: 새로 {len(rep['app_new'])}개, 바뀜 {len(rep['app_updated'])}개, 같음 {rep['app_same']}개"]
+         f"지원서: 새로 {len(rep['app_new'])}개, 바뀜 {len(rep['app_updated'])}개, 같음 {rep['app_same']}개",
+         f"작성 가이드: 새로 {len(rep.get('guide_new', []))}개, 바뀜 {len(rep.get('guide_updated', []))}개, 같음 {rep.get('guide_same', 0)}개"]
     if rep["skipped"]:
         L.append("건너뜀: " + "; ".join(rep["skipped"]))
     if rep["backup"]:

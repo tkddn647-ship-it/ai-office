@@ -138,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
             token = settings.get_keys().get("github", "")
             files = read_source(sync.get("kind", "github"), sync.get("value", ""), token, sync.get("branch") or "main",
                                 opener=getattr(self.server, "gh_opener", None))
-            rep = import_apply(_lib(), files, tuple(b.get("what") or ("exp", "app")), source=sync.get("kind", ""))
+            rep = import_apply(_lib(), files, tuple(b.get("what") or ("exp", "app", "guide")), source=sync.get("kind", ""))
             rep["text"] = summary_text(rep)
             return self._send(200, rep)
         except (ImportError_, LibraryError, OSError) as e:
@@ -164,11 +164,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/lib":
                 lib = _lib()
-                return self._send(200, {"dir": str(lib.root), "experiences": lib.experiences(), "apps": lib.apps()})
+                from .guides import Guides
+                return self._send(200, {"dir": str(lib.root), "experiences": lib.experiences(), "apps": lib.apps(),
+                                        "guides": Guides(lib.root).summary()})
             if path == "/api/exp":
                 return self._send(200, {"id": q.get("id"), "body": _lib().exp_read(q.get("id", ""))})
             if path == "/api/app":
-                return self._send(200, _lib().app_full(q.get("name", "")))
+                from .guides import Guides
+                lib = _lib()
+                a = lib.app_full(q.get("name", ""))
+                g = Guides(lib.root)
+                a["guide_plan"] = {str(k): v for k, v in g.plan(a.get("questions") or [], bool(a.get("defense")))["per_q"].items()}
+                a["guides"] = g.summary()
+                return self._send(200, a)
         except LibraryError as e:
             return self._send(400, {"error": str(e)})
         if path == "/api/events":

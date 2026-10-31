@@ -169,7 +169,7 @@ class Library:
         for i, q in enumerate([q for q in data.get("questions") or [] if (q.get("text") or "").strip()]):
             qs.append({"id": i + 1, "title": (q.get("title") or "").strip(), "text": q["text"].strip(),
                        "limit": int(q.get("limit") or 1000), "count": q.get("count") or "with_spaces"})
-        keep = {k: data.get(k) for k in ("defense", "exp_ids", "target_ai", "target_avg", "max_rounds", "status", "deadline")}
+        keep = {k: data.get(k) for k in ("defense", "exp_ids", "target_ai", "target_avg", "max_rounds", "status", "deadline", "source", "imported_at")}
         a = {"company": company, "role": role, "questions": qs, **{k: v for k, v in keep.items() if v is not None},
              "updated": dt.datetime.now().isoformat(timespec="seconds")}
         (d / "app.json").write_text(json.dumps(a, ensure_ascii=False, indent=2), encoding="utf-8")

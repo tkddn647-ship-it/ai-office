@@ -11,12 +11,20 @@ from .server import TOKEN, serve
 
 def selftest() -> int:
     """빌드 확인용: 서버를 띄워 화면을 한 번 받아 보고 끝낸다."""
+    import urllib.error
     import urllib.request
     httpd = serve(0)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    html = urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/", timeout=10).read().decode("utf-8")
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    html = urllib.request.urlopen(base + "/", timeout=10).read().decode("utf-8")
+
+    def code(token):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(base + "/api/events", headers={"x-token": token}), timeout=10).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    ok = "AI Office Desktop" in html and TOKEN not in html and code(TOKEN) == 200 and code("wrong") == 403
     httpd.shutdown()
-    ok = TOKEN in html and "AI Office Desktop" in html
     print("selftest", "ok" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -31,9 +39,10 @@ def main():
         return selftest()
     httpd = serve(0)
     port = httpd.server_address[1]
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://127.0.0.1:{port}/#t={TOKEN}"   # 토큰은 # 뒤에만: 서버 로그·다른 사이트로 새지 않음
     print(f"AI Office Desktop {__version__}")
     print(f"화면: {url}")
+    print("브라우저를 닫았으면 위 주소를 다시 여세요. 주소는 이번 실행에서만 쓸 수 있고, 남에게 보내지 마세요.")
     print("이 창을 닫으면 프로그램이 끝납니다.")
     threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

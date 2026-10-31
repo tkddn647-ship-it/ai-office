@@ -21,6 +21,7 @@ def app_dir() -> Path:
 DEFAULT = {
     "workspace": "",
     "test_command": "",
+    "test_auto": False,   # AI가 고친 코드로 테스트를 자동 실행할지. 믿을 수 있는 폴더에서만 켠다
     "lang": "한국어",
     "max_tasks": 3,
     "max_fix_rounds": 2,
@@ -35,6 +36,10 @@ DEFAULT = {
     },
     # 화면 입력을 다음 실행에도 남겨 둔다 (포트가 매번 바뀌어 브라우저 저장소를 못 쓰므로)
     "security": {"exposed": True, "data_level": 1},
+    # GitHub 버전에서 경험·지원서 가져오기. kind: github | zip | folder.  auto: 켤 때마다 GitHub에서 최신본 가져오기
+    "sync": {"kind": "github", "value": "", "branch": "main", "auto": False},
+    # 다음에 켤 때 그대로 열리게: 마지막 탭, 마지막 지원서, 마지막 경험
+    "ui": {"mode": "jaso", "sub": "exp", "app": "", "exp": ""},
     "data_dir": "",   # 자소서 자료 폴더. 비우면 문서\AIOffice자소서
 }
 
@@ -89,9 +94,7 @@ def _file_keys() -> dict:
 
 def get_keys() -> dict:
     out = {}
-    for prov in PROVIDERS:
-        if prov == "mock":
-            continue
+    for prov in SECRET_NAMES:
         v = None
         if _HAS_KEYRING:
             try:
@@ -105,8 +108,11 @@ def get_keys() -> dict:
     return out
 
 
+SECRET_NAMES = [p for p in PROVIDERS if p != "mock"] + ["github"]   # github = 비공개 저장소 읽기 전용 토큰
+
+
 def set_key(prov: str, value: str):
-    if prov not in PROVIDERS or prov == "mock":
+    if prov not in SECRET_NAMES:
         return
     if _HAS_KEYRING:
         try:

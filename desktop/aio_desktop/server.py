@@ -1,9 +1,16 @@
 """내 PC 안에서만 열리는 웹 화면(127.0.0.1). 브라우저가 화면, 이 서버가 에이전트를 돌린다.
 
-다른 웹사이트가 이 서버를 몰래 부르지 못하게, 실행할 때마다 만든 토큰이 있어야 API가 동작한다.
+보안
+- 127.0.0.1에만 열어 다른 PC에서는 접속할 수 없다.
+- 실행할 때마다 새 토큰을 만들고, 토큰은 브라우저 주소의 # 뒤로만 넘긴다(서버에 다시 보내지지 않는 부분).
+  화면 HTML에는 토큰이 없어서, 같은 PC의 다른 프로그램이 화면을 받아 가도 API를 쓸 수 없다.
+- Host 헤더가 127.0.0.1/localhost가 아니면 거절한다 (DNS 리바인딩 공격 차단).
+- 모든 API는 x-token 헤더가 있어야 한다. 다른 웹사이트는 이 헤더를 붙여 요청할 수 없다 (브라우저 CORS 사전 확인에서 막힘).
+- 요청 크기 5 MB 제한, 화면을 다른 사이트에 끼워 넣지 못하게 막는 헤더.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import secrets
 import threading
@@ -15,6 +22,7 @@ from . import settings
 from .jaso import JasoRun, organize_experience
 from .library import Library, LibraryError
 from .orchestrator import Run
+from .importer import ImportError_, apply as import_apply, read_source, summary_text
 from .security import SecurityRun
 from .providers import PROVIDERS
 from .workspace import Workspace, WorkspaceError
@@ -28,6 +36,8 @@ class State:
     run = None          # Run | SecurityRun | JasoRun
     mode = "code"
     thread: threading.Thread | None = None
+    synced = False      # 켤 때 자동 가져오기는 한 번만
+    import_lock = threading.Lock()
 
 
 def _push(ev: dict):
@@ -44,7 +54,7 @@ def _page() -> bytes:
         html = (Path(frozen) / "aio_desktop/static/index.html").read_text(encoding="utf-8")
     else:
         html = resources.files("aio_desktop").joinpath("static/index.html").read_text(encoding="utf-8")
-    return html.replace("__TOKEN__", TOKEN).encode("utf-8")
+    return html.encode("utf-8")
 
 
 def _browse() -> str:
@@ -75,18 +85,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("content-type", ctype)
         self.send_header("cache-control", "no-store")
+        self.send_header("x-content-type-options", "nosniff")
+        self.send_header("referrer-policy", "no-referrer")
+        self.send_header("content-security-policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                                                    "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         self.send_header("content-length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
+    def _host_ok(self) -> bool:
+        port = self.server.server_address[1]
+        if (self.headers.get("host") or "").lower() not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            self._send(403, {"error": "허용되지 않은 주소"})
+            return False
+        return True
+
     def _auth(self) -> bool:
-        if self.headers.get("x-token") != TOKEN:
-            self._send(403, {"error": "토큰이 맞지 않습니다"})
+        if not hmac.compare_digest((self.headers.get("x-token") or "").encode(), TOKEN.encode()):
+            self._send(403, {"error": "토큰이 맞지 않습니다. 검은 창에 나온 주소로 다시 열어 주세요"})
             return False
         return True
 
     def _body(self) -> dict:
         n = int(self.headers.get("content-length") or 0)
+        if n > 5 * 1024 * 1024:
+            raise ValueError("요청이 너무 큽니다")
         if not n:
             return {}
         try:
@@ -94,9 +117,40 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def _import(self, b: dict):
+        """GitHub 버전에서 경험·지원서 가져오기. startup=True는 화면이 켜질 때 부르는 자동 가져오기
+        (설정에서 auto를 켰을 때만, 실행마다 한 번)."""
+        cfg = settings.load_config()
+        sync = cfg.get("sync") or {}
+        if b.get("startup"):
+            if State.synced or not sync.get("auto") or sync.get("kind") != "github" or not sync.get("value"):
+                return self._send(200, {"not_run": True})
+            State.synced = True
+        else:
+            for k in ("kind", "value", "branch", "auto"):
+                if k in b:
+                    sync[k] = b[k]
+            cfg["sync"] = sync
+            settings.save_config(cfg)
+        if not State.import_lock.acquire(blocking=False):
+            return self._send(409, {"error": "이미 가져오는 중입니다"})
+        try:
+            token = settings.get_keys().get("github", "")
+            files = read_source(sync.get("kind", "github"), sync.get("value", ""), token, sync.get("branch") or "main",
+                                opener=getattr(self.server, "gh_opener", None))
+            rep = import_apply(_lib(), files, tuple(b.get("what") or ("exp", "app")), source=sync.get("kind", ""))
+            rep["text"] = summary_text(rep)
+            return self._send(200, rep)
+        except (ImportError_, LibraryError, OSError) as e:
+            return self._send(400, {"error": str(e)})
+        finally:
+            State.import_lock.release()
+
     # ---------- GET ----------
     def do_GET(self):
         path = urlparse(self.path).path
+        if not self._host_ok():
+            return
         if path == "/":
             return self._send(200, _page(), "text/html; charset=utf-8")
         if not self._auth():
@@ -104,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/config":
             cfg = settings.load_config()
             keys = settings.get_keys()
-            return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in PROVIDERS if p != "mock"},
+            return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in settings.SECRET_NAMES},
                                     "providers": PROVIDERS, "key_store": settings.key_store()})
         q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
         try:
@@ -133,15 +187,20 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- POST ----------
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self._host_ok():
+            return
         if not self._auth():
             return
-        b = self._body()
+        try:
+            b = self._body()
+        except ValueError as e:
+            return self._send(413, {"error": str(e)})
         if path == "/api/config":
             cfg = settings.load_config()
-            for k in ("workspace", "test_command", "lang", "max_tasks", "max_fix_rounds", "max_calls", "data_dir"):
+            for k in ("workspace", "test_command", "test_auto", "lang", "max_tasks", "max_fix_rounds", "max_calls", "data_dir"):
                 if k in b:
                     cfg[k] = b[k]
-            for k in ("security",):
+            for k in ("security", "sync", "ui"):
                 if isinstance(b.get(k), dict):
                     cfg[k] = {**cfg.get(k, {}), **b[k]}
             for role, v in (b.get("roles") or {}).items():
@@ -171,6 +230,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
         except Exception as e:   # noqa: BLE001  AI 호출 실패 등
             return self._send(502, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/import":
+            return self._import(b)
+        if path == "/api/browse_file":
+            return self._send(200, {"path": _browse_file()})
         if path == "/api/browse":
             return self._send(200, {"path": _browse()})
         if path == "/api/run":
@@ -230,6 +293,18 @@ class Handler(BaseHTTPRequestHandler):
                 State.run.stop_flag.set()
             return self._send(200, {"ok": True})
         return self._send(404, {"error": "없는 주소"})
+
+
+def _browse_file() -> str:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk(); root.withdraw(); root.attributes("-topmost", True)
+        path = filedialog.askopenfilename(title="GitHub에서 받은 zip 선택", filetypes=[("zip", "*.zip")])
+        root.destroy()
+        return path or ""
+    except Exception:   # noqa: BLE001
+        return ""
 
 
 def serve(port: int = 0, mock=None, fetch=None) -> ThreadingHTTPServer:

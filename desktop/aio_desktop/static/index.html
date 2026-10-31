@@ -53,6 +53,7 @@ table.t th{background:#f2f4f8}
 details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--accent)}
 .ans{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0;background:#fcfcfd}
 .only{display:none}
+#s_imp,#s_exp,#s_app{display:none}
 #work{flex:1;display:flex;min-height:0}
 #jview{width:58%;max-width:820px;overflow:auto;padding:14px 18px;border-right:1px solid var(--line);background:var(--panel)}
 .sub{display:flex;gap:6px;margin-bottom:10px}.sub button{background:#eef1f6;color:var(--ink)}.sub button.on{background:var(--ink);color:#fff}
@@ -74,7 +75,9 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
   <h2>작업 폴더</h2>
   <div class="row"><input id="workspace" placeholder="C:\projects\my-app"><button class="ghost" style="flex:none" onclick="browse()">찾기</button></div>
   <div class="only" data-for="code"><label>테스트 명령 (비우면 생략)</label>
-  <input id="test_command" placeholder="예: python -m pytest -q"></div>
+  <input id="test_command" placeholder="예: python -m pytest -q">
+  <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="test_auto" style="width:auto"> AI가 고친 코드로 테스트 자동 실행</label>
+  <div class="hint">테스트는 AI가 바꾼 코드를 내 PC에서 실행합니다. 남이 만든 저장소처럼 믿기 어려운 폴더에서는 끄고, diff를 본 뒤 직접 실행하세요.</div></div>
   </div>
   <div class="only" data-for="jaso">
   <h2>자료 폴더</h2>
@@ -107,7 +110,26 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
   <div id="status">대기 중</div>
   <div id="work">
   <div id="jview" class="only" data-for="jaso">
-    <div class="sub"><button data-s="exp" onclick="jsub('exp')">① 내 경험·활동</button><button data-s="app" onclick="jsub('app')">② 지원서 · 자소서</button></div>
+    <div class="sub"><button data-s="imp" onclick="jsub('imp')">⓪ 가져오기</button><button data-s="exp" onclick="jsub('exp')">① 내 경험·활동</button><button data-s="app" onclick="jsub('app')">② 지원서 · 자소서</button></div>
+
+    <section id="s_imp">
+      <div class="hint">GitHub 버전(for_office)에 정리해 둔 <b>experiences/</b> 경험 기록과 <b>applications/·jd/·final/</b> 지원서를 그대로 가져옵니다. 따로 다시 정리할 필요 없습니다.
+        바뀌는 파일은 먼저 자료 폴더 _백업에 복사합니다. 이 프로그램에서 고른 근거 경험·목표 점수는 유지합니다.</div>
+      <label>가져올 곳</label>
+      <select id="g_kind" onchange="impKind()"><option value="github">GitHub 저장소에서 바로</option><option value="zip">내려받은 zip 파일 (Code → Download ZIP)</option><option value="folder">내 PC의 clone 폴더</option></select>
+      <div id="g_gh">
+        <div class="row"><div><label>저장소</label><input id="g_repo" placeholder="tkddn647-ship-it/for_office"></div><div style="flex:.5"><label>브랜치</label><input id="g_branch" placeholder="main"></div></div>
+        <label>GitHub 토큰 (비공개 저장소일 때) <span id="g_tokset" class="keyset"></span></label>
+        <div class="row"><input id="g_token" type="password" placeholder="github_pat_… · 저장하면 Windows 자격 증명 관리자에 보관"><button class="ghost" style="flex:none" onclick="tokDel()">삭제</button></div>
+        <div class="hint">토큰은 <b>Fine-grained token</b>으로, 저장소는 이 저장소 하나만, 권한은 <b>Contents: Read-only</b> 하나만, 만료일을 정해서 만드세요. 쓰기 권한 토큰은 넣지 마세요.</div>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="g_auto" style="width:auto"> 프로그램을 켤 때마다 GitHub에서 최신본 가져오기</label>
+      </div>
+      <div id="g_local" style="display:none"><label>경로</label><div class="row"><input id="g_path"><button class="ghost" style="flex:none" onclick="impBrowse()">찾기</button></div></div>
+      <div class="row" style="margin-top:6px"><label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_exp" checked style="width:auto"> 경험·활동</label>
+        <label style="display:flex;gap:6px;align-items:center;flex:none"><input type="checkbox" id="g_app" checked style="width:auto"> 지원서·공고·답</label></div>
+      <button onclick="impRun()" style="margin-top:8px">가져오기</button>
+      <pre id="g_result" class="hint" style="white-space:pre-wrap"></pre>
+    </section>
 
     <section id="s_exp">
       <div class="hint">자소서는 여기 적은 경험만 근거로 씁니다. 적지 않은 수치·역할은 AI가 지어내지 않고 [확인 필요]로 남깁니다. 시뮬레이션과 실측은 꼭 구분해 적으세요.</div>
@@ -175,7 +197,10 @@ details{margin-top:6px;font-size:12.5px} summary{cursor:pointer;color:var(--acce
 <div id="diffbox" onclick="this.style.display='none'"></div>
 
 <script>
-const TOKEN="__TOKEN__";
+// 토큰은 주소의 # 뒤에서 읽고(서버로 보내지지 않음) 이 탭에만 보관한다. 주소창에서는 지운다.
+const TOKEN=(()=>{ const m=location.hash.match(/t=([\w-]+)/); let t=m?m[1]:"";
+  try{ if(t) sessionStorage.setItem("aio_t",t); else t=sessionStorage.getItem("aio_t")||""; }catch(e){}
+  if(m) history.replaceState(null,"",location.pathname); return t; })();
 const ROLES={planner:["팀장 · 기획","code"],builder:["개발 · 구현","code"],reviewer:["리뷰","code"],
   advisor:["보안 조치안","security"],writer:["자소서 작성","jaso"],judge:["서류 심사관 5명 · AI 판별관","jaso"]};
 const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️",scanner:"🛰️",advisor:"🛡️",writer:"✍️",judge:"⚖️",detector:"🤖"};
@@ -185,7 +210,7 @@ const EMPTY={code:'왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한
   security:"작업 폴더를 고르고 노출 여부·데이터 등급을 정한 뒤 시작을 누르세요. 결과 표가 여기에 나옵니다.",
   jaso:"① 내 경험·활동을 적어 저장하고, ② 지원서에 회사 공고와 자소서 항목을 넣은 뒤 'AI로 작성 + 심사'를 누르세요.<br>진행 상황과 심사 점수가 여기에 나옵니다. API 키는 왼쪽 아래에서 넣습니다."};
 let PROV={}, since=0, timer=null, MODE="code", RUNMODE="code";
-function setMode(m){ MODE=m;
+function setMode(m){ MODE=m; UI.mode=m; uiSave();
   document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
   document.querySelectorAll(".only").forEach(e=>e.style.display=e.dataset.for.split(" ").includes(m)?(e.dataset.disp||"block"):"none");
   if(m==="jaso") libLoad();
@@ -205,6 +230,7 @@ function el(t,a={},kids=[]){const e=document.createElement(t);const {dataset,...
 async function load(){
   const j=await api("/api/config"); PROV=j.providers; const c=j.config;
   ["workspace","test_command","max_tasks","max_fix_rounds","max_calls"].forEach(k=>document.getElementById(k).value=c[k]??"");
+  document.getElementById("test_auto").checked=!!c.test_auto;
   const roles=document.getElementById("roles"); roles.innerHTML="";
   for(const [r,[lab,m]] of Object.entries(ROLES)){
     const sel=el("select",{id:"p_"+r}); for(const [k,v] of Object.entries(PROV)) sel.append(el("option",{value:k,textContent:v.label}));
@@ -214,7 +240,12 @@ async function load(){
     roles.append(el("div",{className:"rolebox",dataset:{for:m}},[el("label",{textContent:lab}),el("div",{className:"row"},[sel,mod])]));
   }
   const sc=c.security||{}; document.getElementById("s_exposed").value=sc.exposed===false?"0":"1"; document.getElementById("s_data").value=String(sc.data_level??1);
-  document.getElementById("data_dir").value=c.data_dir||""; setMode(MODE);
+  document.getElementById("data_dir").value=c.data_dir||"";
+  const sy=c.sync||{}; document.getElementById("g_kind").value=sy.kind||"github"; document.getElementById("g_repo").value=sy.kind==="github"?(sy.value||""):"";
+  document.getElementById("g_path").value=sy.kind!=="github"?(sy.value||""):""; document.getElementById("g_branch").value=sy.branch||"main";
+  document.getElementById("g_auto").checked=!!sy.auto; impKind(); document.getElementById("g_tokset").textContent=j.keys_set.github?"● 저장됨":"";
+  if(!RESTORED){ UI={...UI,...(c.ui||{})}; MODE=UI.mode||"jaso"; }
+  setMode(MODE);
   document.getElementById("keystore").textContent="저장 위치: "+j.key_store+". 키는 이 PC에서 각 회사 API로만 보냅니다.";
   const keys=document.getElementById("keys"); keys.innerHTML="";
   for(const [k,v] of Object.entries(PROV)){ if(k==="mock")continue;
@@ -227,7 +258,7 @@ async function save(){
   const roles={}; for(const r of Object.keys(ROLES)) roles[r]={provider:document.getElementById("p_"+r).value,model:document.getElementById("m_"+r).value};
   const keys={}; for(const k of Object.keys(PROV)){ if(k==="mock")continue; const v=document.getElementById("k_"+k).value; if(v) keys[k]=v; }
   const n=id=>parseInt(document.getElementById(id).value||"0");
-  await api("/api/config",{workspace:document.getElementById("workspace").value.trim(),test_command:document.getElementById("test_command").value,
+  await api("/api/config",{workspace:document.getElementById("workspace").value.trim(),test_command:document.getElementById("test_command").value,test_auto:document.getElementById("test_auto").checked,
     max_tasks:n("max_tasks"),max_fix_rounds:n("max_fix_rounds"),max_calls:n("max_calls"),roles,keys,
     security:{exposed:document.getElementById("s_exposed").value==="1",data_level:parseInt(document.getElementById("s_data").value)},
     data_dir:document.getElementById("data_dir").value.trim()});
@@ -314,7 +345,31 @@ function aicheckView(ev){ const box=el("div"); const j=ev.detect.judge||{};
 // ---------------- 자소서 ----------------
 let LIB={experiences:[],apps:[]}, CUR_EXP=null, CUR_APP=null;
 function jsub(x){ document.querySelectorAll(".sub button").forEach(b=>b.classList.toggle("on",b.dataset.s===x));
-  document.getElementById("s_exp").style.display=x==="exp"?"block":"none"; document.getElementById("s_app").style.display=x==="app"?"block":"none"; }
+  ["imp","exp","app"].forEach(k=>document.getElementById("s_"+k).style.display=x===k?"block":"none"); UI.sub=x; uiSave(); }
+// ---- 다음에 켤 때 그대로 열리게 ----
+let UI={mode:"jaso",sub:"exp",app:"",exp:""}, uiTimer=null, RESTORED=false;
+function uiSave(){ if(!RESTORED) return; clearTimeout(uiTimer); uiTimer=setTimeout(()=>api("/api/config",{ui:UI}).catch(()=>{}),400); }
+// ---- 가져오기 ----
+function impKind(){ const k=document.getElementById("g_kind").value; document.getElementById("g_gh").style.display=k==="github"?"block":"none"; document.getElementById("g_local").style.display=k==="github"?"none":"block"; }
+async function impBrowse(){ const k=document.getElementById("g_kind").value; const j=await api(k==="zip"?"/api/browse_file":"/api/browse",{}); if(j.path) document.getElementById("g_path").value=j.path; }
+async function tokDel(){ await api("/api/config",{keys:{github:"__delete__"}}); document.getElementById("g_tokset").textContent=""; }
+async function impRun(auto){
+  const out=document.getElementById("g_result");
+  try{
+    let body;
+    if(auto){ body={startup:true}; }
+    else{ const k=document.getElementById("g_kind").value; const tok=document.getElementById("g_token").value.trim();
+      if(tok){ await api("/api/config",{keys:{github:tok}}); document.getElementById("g_token").value=""; document.getElementById("g_tokset").textContent="● 저장됨"; }
+      body={kind:k,value:k==="github"?document.getElementById("g_repo").value.trim():document.getElementById("g_path").value.trim(),
+        branch:document.getElementById("g_branch").value.trim()||"main",auto:document.getElementById("g_auto").checked,
+        what:[...(document.getElementById("g_exp").checked?["exp"]:[]),...(document.getElementById("g_app").checked?["app"]:[])]};
+      out.textContent="가져오는 중…"; }
+    const r=await api("/api/import",body); if(r.not_run) return;
+    out.textContent=(auto?"켤 때 자동으로 가져왔습니다.\n":"")+r.text;
+    render({role:"system",kind:"info",time:"",text:(auto?"GitHub에서 최신본을 가져왔습니다.\n":"가져오기 완료\n")+r.text});
+    await libLoad(true); renderExpPick(); if(CUR_APP) appLoad(CUR_APP);
+  }catch(e){ out.textContent="실패: "+e.message; if(auto) render({role:"system",kind:"error",time:"",text:"켤 때 자동 가져오기 실패: "+e.message}); }
+}
 async function libLoad(keep){
   try{ LIB=await api("/api/lib"); }catch(e){ return alertBox(e.message) }
   const L=document.getElementById("explist"); L.innerHTML="";
@@ -324,7 +379,12 @@ async function libLoad(keep){
   S.append(el("option",{value:"",textContent:LIB.apps.length?"지원서 고르기":"지원서가 없습니다 · 아래에 새로 적기"}));
   LIB.apps.forEach(a=>S.append(el("option",{value:a.name,textContent:`${a.company} ${a.role}`.trim()+(a.status?` · ${a.status}`:"")})));
   S.value=CUR_APP||"";
-  if(!keep){ renderExpPick(); if(!CUR_EXP&&!document.getElementById("e_body").value) expNew();
+  if(!keep){ renderExpPick();
+    if(!RESTORED){ RESTORED=true;
+      if(UI.exp&&LIB.experiences.some(x=>x.id===UI.exp)) await expOpen(UI.exp); else expNew();
+      if(UI.app&&LIB.apps.some(a=>a.name===UI.app)) await appLoad(UI.app); else appNew();
+      jsub(UI.sub||(LIB.experiences.length?"app":"imp")); impRun(true); return; }
+    if(!CUR_EXP&&!document.getElementById("e_body").value) expNew();
     if(!CUR_APP&&!document.getElementById("a_qs").children.length) appNew();
     if(!document.querySelector(".sub button.on")) jsub("exp"); }
 }
@@ -332,7 +392,7 @@ const EXP_TPL=`| 항목 | 내용 |\n|---|---|\n| 기간 | |\n| 소속 / 활동 |
 function markExp(){ document.querySelectorAll("#explist .chip").forEach(c=>c.classList.toggle("on",c.dataset.id===CUR_EXP)); }
 function expNew(){ CUR_EXP=null; document.getElementById("e_title").value=""; document.getElementById("e_body").value=EXP_TPL;
   document.getElementById("e_info").textContent="새 경험"; markExp(); }
-async function expOpen(id){ const j=await api("/api/exp?id="+encodeURIComponent(id)); CUR_EXP=id;
+async function expOpen(id){ const j=await api("/api/exp?id="+encodeURIComponent(id)); CUR_EXP=id; UI.exp=id; uiSave();
   const lines=j.body.split("\n"); document.getElementById("e_title").value=(lines[0]||"").replace(/^#\s*(EXP-\d+\s*[:：]\s*)?/,"");
   document.getElementById("e_body").value=lines.slice(1).join("\n").replace(/^\n+/,""); document.getElementById("e_info").textContent=id+" 수정 중"; markExp(); }
 async function expSave(){ const t=document.getElementById("e_title").value.trim(); if(!t) return alertBox("제목을 적어 주세요");
@@ -363,11 +423,13 @@ function renderExpPick(sel){ const box=document.getElementById("a_exps");
   LIB.experiences.forEach(x=>{ const c=el("button",{className:"chip"+(all||cur.includes(x.id)?" on":""),textContent:x.id+" "+x.title,dataset:{id:x.id}});
     c.onclick=()=>c.classList.toggle("on"); box.append(c) });
   if(!LIB.experiences.length) box.append(el("span",{className:"hint",textContent:"① 내 경험·활동에서 먼저 경험을 저장하세요"})); }
-function appNew(){ CUR_APP=null; document.getElementById("applist").value="";
+function appNew(){ CUR_APP=null; UI.app=""; uiSave(); document.getElementById("applist").value="";
   ["a_company","a_role","a_deadline","a_jd","a_info"].forEach(i=>document.getElementById(i).value="");
   document.getElementById("a_defense").checked=false; document.getElementById("a_ai").value=2; document.getElementById("a_avg").value=3.5; document.getElementById("a_rounds").value=3;
   document.getElementById("a_qs").innerHTML=""; document.getElementById("a_answers").innerHTML=""; addQ({title:"지원동기"}); renderExpPick([]); }
-async function appLoad(name){ if(!name) return appNew(); const a=await api("/api/app?name="+encodeURIComponent(name)); CUR_APP=name;
+async function appLoad(name){ if(!name) return appNew(); const a=await api("/api/app?name="+encodeURIComponent(name)); CUR_APP=name; UI.app=name; uiSave();
+  document.getElementById("applist").value=name;
+  showLastReview(a);
   const set=(i,v)=>document.getElementById(i).value=v;
   set("a_company",a.company||""); set("a_role",a.role||""); set("a_deadline",a.deadline||""); set("a_jd",a.jd||""); set("a_info",a.company_info||"");
   document.getElementById("a_defense").checked=!!a.defense; set("a_ai",a.target_ai??2); set("a_avg",a.target_avg??3.5); set("a_rounds",a.max_rounds??3);
@@ -375,9 +437,10 @@ async function appLoad(name){ if(!name) return appNew(); const a=await api("/api
   (a.questions||[]).forEach(q=>document.getElementById("a_qs").append(qRow(q))); calls(); renderExpPick(a.exp_ids||[]); renderAnswers(a.answers||{}); }
 function qList(all){ return [...document.querySelectorAll("#a_qs .q")].map(b=>({title:b.querySelector(".qn").value.trim(),text:b.querySelector(".qt").value.trim(),
   limit:parseInt(b.querySelector(".ql").value||"1000"),count:b.querySelector(".qc").value})).filter(q=>all||q.text); }
-function subText(t){ t=(t||"").trim(); const i=t.indexOf("\n"); if(i<0) return t;
-  const body=t.slice(i+1).replace(/\s*\[(?!확인 필요)[^\[\]\n]{1,60}\]/g,"").replace(/[ \t]+\n/g,"\n").trim();
-  return body?t.slice(0,i).trim()+"\n"+body:t.slice(0,i).trim(); }
+function subText(t){ t=(t||"").trim(); const i=t.indexOf("\n"); const first=(i<0?t:t.slice(0,i)).trim();
+  const isHead=/^\[[^\[\]\n]+\]$/.test(first); const rest=isHead?(i<0?"":t.slice(i+1)):t;
+  const body=rest.replace(/\s*\[(?!확인 필요)[^\[\]\n]{1,60}\]/g,"").replace(/[ \t]+\n/g,"\n").trim();
+  return isHead?(body?first+"\n"+body:first):body; }
 function countText(t,mode){ return mode==="without_spaces"?t.replace(/\s/g,"").length:mode==="bytes"?[...t].reduce((s,c)=>s+(c.charCodeAt(0)>127?2:1),0):t.length; }
 function renderAnswers(ans){ const box=document.getElementById("a_answers"); const old={}; box.querySelectorAll("textarea").forEach(t=>old[t.dataset.q]=t.value); box.innerHTML="";
   qList(true).forEach((q,i)=>{ const id=String(i+1); const ta=el("textarea",{value:ans[id]??old[id]??"",dataset:{q:id},style:"height:200px",placeholder:"AI로 작성하거나 직접 써서 붙여 넣으세요. 첫 줄은 [소제목]"});
@@ -397,6 +460,14 @@ async function appRun(m){ if(!(await appSave(true))) return; try{ await save(); 
   await api("/api/run",{mode:"jaso",app:CUR_APP,jaso_mode:m}); }catch(e){ alertBox(e.message) } }
 document.addEventListener("change",e=>{ if(e.target.closest&&e.target.closest("#a_qs")) renderAnswers({}); });
 document.addEventListener("input",e=>{ if(e.target.id==="a_rounds") calls(); });
+function showLastReview(a){ const lr=a.last_review; if(!lr||!lr.rounds||!lr.rounds.length) return;
+  if(State_running()) return;
+  const rec=lr.rounds.find(r=>r.round===lr.best_round)||lr.rounds[lr.rounds.length-1]; const qs=a.questions||[];
+  document.getElementById("feed").innerHTML=""; since=Math.max(since,0);
+  render({role:"system",kind:"info",time:"",text:`${a.company} ${a.role} · 지난 결과 (${lr.time||""})`});
+  if(rec.panel&&Object.keys(rec.panel).length) render({role:"judge",kind:"scores",time:"",text:"지난 서류 심사",summary:rec.summary,mech:rec.mech,panel:rec.panel,questions:qs,decision:rec.decision});
+  if(rec.detect) render({role:"detector",kind:"aicheck",time:"",text:"지난 AI 작성 확인",detect:rec.detect,summary:rec.summary,questions:qs,target:a.target_ai??2}); }
+let LAST_STATE="idle"; function State_running(){ return LAST_STATE==="running"||LAST_STATE==="waiting_approval"; }
 function finalView(ev){
   if(RUNMODE==="jaso"||MODE==="jaso"){ jsub("app"); renderAnswers(ev.answers||{});
     return el("div",{className:"files",textContent:`${ev.round}차 결과를 왼쪽 답 칸에 채웠습니다. 읽고 고친 뒤 '답 저장' 또는 아래 '이대로 저장'을 누르세요.`}); }
@@ -407,7 +478,7 @@ async function poll(){
     j.events.forEach(e=>{render(e);since=e.i+1});
     const st={idle:"대기 중",running:"작업 중…",waiting_approval:"사람 확인 대기",failed:"멈춤",done:"완료",discarded:"닫음"}[j.state]||j.state;
     document.getElementById("status").textContent=st;
-    RUNMODE=j.mode||"code";
+    RUNMODE=j.mode||"code"; LAST_STATE=j.state;
     const show=(j.state==="waiting_approval"||j.state==="failed");
     document.getElementById("approval").style.display=show?"flex":"none";
     document.getElementById("b_diff").style.display=RUNMODE==="code"?"":"none";

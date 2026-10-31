@@ -1,1 +1,2 @@
 keyring>=24
+pyyaml>=6

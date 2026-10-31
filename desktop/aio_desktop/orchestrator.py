@@ -125,7 +125,12 @@ class Run:
 
             rounds = int(self.cfg.get("max_fix_rounds", 2))
             for rnd in range(rounds + 1):
-                ok, out = self.ws.run_test(self.cfg.get("test_command", ""))
+                # AI가 고친 코드를 실행하는 단계라, 작업 폴더나 요청에 숨은 지시(프롬프트 인젝션)로 위험한 코드가 들어가면
+                # 그대로 실행될 수 있다. 그래서 사용자가 '자동 실행'을 켠 경우에만 돌린다.
+                if self.cfg.get("test_command", "").strip() and not self.cfg.get("test_auto", True):
+                    ok, out = True, "(테스트 자동 실행이 꺼져 있어 건너뜀. 승인 전에 diff를 보고 직접 실행하세요)"
+                else:
+                    ok, out = self.ws.run_test(self.cfg.get("test_command", ""))
                 self.emit("tester", ("테스트 통과" if ok else "테스트 실패") + f"\n{out[-1500:]}", "test", ok=ok)
                 rv = self.review(plan, ok, out)
                 verdict = (rv.get("verdict") or "").upper()

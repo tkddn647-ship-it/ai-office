@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read   # 빌드는 읽기만. 릴리스 단계만 쓰기 권한
 
 jobs:
   build:
@@ -32,16 +32,35 @@ jobs:
           git config --global user.name "ci"
           python -m unittest -v tests/test_desktop.py tests/test_modes.py
       - name: exe 만들기
-        run: pyinstaller --noconfirm --onefile --name AIOfficeDesktop --add-data "aio_desktop/static;aio_desktop/static" --hidden-import keyring.backends.Windows run.py
+        run: pyinstaller --noconfirm --onefile --name AIOfficeDesktop --version-file version_info.txt --add-data "aio_desktop/static;aio_desktop/static" --hidden-import keyring.backends.Windows run.py
       - name: exe 자체 점검
         run: .\dist\AIOfficeDesktop.exe --selftest
+      - name: SHA-256 (받은 파일이 진짜인지 확인용)
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist\AIOfficeDesktop.exe -Algorithm SHA256).Hash
+          "$h  AIOfficeDesktop.exe" | Out-File -Encoding ascii dist\AIOfficeDesktop.exe.sha256
+          Write-Host "SHA256 $h"
       - uses: actions/upload-artifact@v4
         with:
           name: AIOfficeDesktop-windows
-          path: desktop/dist/AIOfficeDesktop.exe
-      - name: 릴리스 (태그일 때만)
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        shell: bash
+          path: |
+            desktop/dist/AIOfficeDesktop.exe
+            desktop/dist/AIOfficeDesktop.exe.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: AIOfficeDesktop-windows
+          path: dist
+      - name: 릴리스
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/AIOfficeDesktop.exe --title "AI Office Desktop ${GITHUB_REF_NAME#desktop-v}" --notes-file README.md
+        run: gh release create "${GITHUB_REF_NAME}" dist/AIOfficeDesktop.exe dist/AIOfficeDesktop.exe.sha256 --title "AI Office Desktop ${GITHUB_REF_NAME#desktop-v}" --notes-file desktop/README.md

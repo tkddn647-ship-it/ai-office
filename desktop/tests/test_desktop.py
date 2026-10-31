@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -146,7 +147,12 @@ class ServerTest(unittest.TestCase):
 
             self.assertEqual(call("/api/config", token="wrong")[0], 403)
             page = urllib.request.urlopen(base + "/").read().decode()
-            self.assertIn(server.TOKEN, page)
+            self.assertNotIn(server.TOKEN, page)                   # 화면 HTML에는 토큰 없음 (주소 # 뒤로만)
+            # DNS 리바인딩: Host가 다른 이름이면 토큰이 맞아도 거절
+            req = urllib.request.Request(base + "/api/config", headers={"x-token": server.TOKEN, "host": "evil.example:80"})
+            with self.assertRaises(urllib.error.HTTPError) as c:
+                urllib.request.urlopen(req)
+            self.assertEqual(c.exception.code, 403)
             roles = {r: {"provider": "mock", "model": "mock"} for r in ("planner", "builder", "reviewer")}
             self.assertEqual(call("/api/config", {"workspace": work, "roles": roles, "keys": {"openai": "sk-test"}})[0], 200)
             st, cfg = call("/api/config")

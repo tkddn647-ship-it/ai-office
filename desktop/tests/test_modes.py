@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -211,6 +212,96 @@ class JasoTest(unittest.TestCase):
         self.assertLessEqual(jaso.ai_signals(human)["rule_score"], 1)
 
 
+def make_repo(root: Path):
+    """for_office와 같은 모양의 작은 저장소."""
+    (root / "experiences").mkdir(parents=True)
+    (root / "experiences" / "EXP-01-rocket.md").write_text("# EXP-01: 로켓\n추력 측정 [확인 필요: 기간]\n", encoding="utf-8")
+    (root / "experiences" / "EXP-02-car.md").write_text("# EXP-02: 레이싱카\n강화학습\n", encoding="utf-8")
+    (root / "experiences" / "README.md").write_text("무시", encoding="utf-8")
+    a = root / "applications" / "A사-개발"
+    a.mkdir(parents=True)
+    (a / "questions.yaml").write_text("company: A사\nrole: 개발\nresult: \"제출 완료\"\ndefense: true\nquestions:\n"
+                                      "  - {id: 1, title: 지원동기, text: \"지원 동기?\", limit: 800, count: with_spaces}\n"
+                                      "  - id: 2\n    title: 역량\n    text: \"역량?\"\n    limit: 600\n    count: without_spaces\n", encoding="utf-8")
+    (a / "Q1.md").write_text("[초안 1]\n초안 [EXP-01]", encoding="utf-8")
+    (root / "applications" / "_template").mkdir()
+    (root / "applications" / "_template" / "questions.yaml").write_text("company: 회사명\nquestions: [{id: 1, text: x}]", encoding="utf-8")
+    (root / "final" / "A사-개발").mkdir(parents=True)
+    (root / "final" / "A사-개발" / "Q1.md").write_text("[최종 1]\n최종본 [EXP-01] [JD]", encoding="utf-8")
+    (root / "jd" / "A사").mkdir(parents=True)
+    (root / "jd" / "A사" / "공고.md").write_text("담당업무: 개발", encoding="utf-8")
+
+
+class ImportTest(unittest.TestCase):
+    def test_folder_zip_tar_same_result(self):
+        import io, tarfile, zipfile
+        from aio_desktop import importer
+        with tempfile.TemporaryDirectory() as src:
+            make_repo(Path(src) / "for_office-main")
+            repo = Path(src) / "for_office-main"
+            zb = io.BytesIO()
+            with zipfile.ZipFile(zb, "w") as z:
+                for p in repo.rglob("*"):
+                    if p.is_file():
+                        z.write(p, "for_office-main/" + p.relative_to(repo).as_posix())
+            tb = io.BytesIO()
+            with tarfile.open(fileobj=tb, mode="w:gz") as t:
+                t.add(repo, arcname="o-for_office-abc123")
+                evil = tarfile.TarInfo("o-for_office-abc123/experiences/EXP-09-link.md"); evil.type = tarfile.SYMTYPE; evil.linkname = "/etc/passwd"
+                t.addfile(evil)
+                big = tarfile.TarInfo("o-for_office-abc123/../../escape.md"); data = b"x"; big.size = 1
+                t.addfile(big, io.BytesIO(data))
+            a = importer._from_dir(repo)
+            b = importer._from_zip(zb.getvalue())
+            c = importer._from_tar(tb.getvalue())
+            self.assertEqual(set(a), set(b))
+            self.assertEqual(set(a), set(c))                         # 링크·바깥 경로는 빠짐
+            self.assertNotIn("experiences/README.md", a)
+            self.assertFalse(any(k.startswith("applications/_template") for k in a))
+
+    def test_apply_and_reapply(self):
+        from aio_desktop import importer
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+            make_repo(Path(src))
+            lib = Library(data)
+            lib.exp_save(None, "내가 앱에서 쓴 것", "로컬")             # EXP-01 (로컬) → 저장소 것으로 바뀌고 백업
+            files = importer.read_source("folder", src)
+            rep = importer.apply(lib, files, source="folder")
+            self.assertEqual((rep["exp_new"], rep["exp_updated"]), (["EXP-02"], ["EXP-01"]))
+            self.assertTrue(list(Path(rep["backup"]).rglob("EXP-01-*.md")))
+            self.assertTrue((Path(data) / "experiences" / "EXP-01-rocket.md").exists())
+            self.assertEqual(len(list((Path(data) / "experiences").glob("EXP-01*"))), 1)
+            self.assertEqual(rep["app_new"], ["A사-개발"])
+            app = lib.app_full("A사-개발")
+            self.assertEqual([q["limit"] for q in app["questions"]], [800, 600])
+            self.assertEqual(app["questions"][1]["count"], "without_spaces")
+            self.assertTrue(app["defense"])
+            self.assertEqual(app["status"], "제출 완료")
+            self.assertEqual(app["jd"], "담당업무: 개발")
+            self.assertIn("최종본", app["answers"]["1"])                 # final/ 이 우선
+            self.assertEqual((Path(data) / "applications" / "A사-개발" / "Q1.제출용.txt").read_text(encoding="utf-8"), "[최종 1]\n최종본")
+            # 내가 앱에서 정한 목표 점수는 다시 가져와도 유지
+            d = json.loads((Path(data) / "applications" / "A사-개발" / "app.json").read_text(encoding="utf-8"))
+            d["target_ai"] = 1
+            (Path(data) / "applications" / "A사-개발" / "app.json").write_text(json.dumps(d), encoding="utf-8")
+            rep2 = importer.apply(lib, files)
+            self.assertEqual((rep2["exp_same"], rep2["exp_new"], rep2["exp_updated"]), (2, [], []))
+            (Path(src) / "final" / "A사-개발" / "Q1.md").write_text("[최종 2]\n바뀜", encoding="utf-8")
+            rep3 = importer.apply(lib, importer.read_source("folder", src))
+            self.assertEqual(rep3["app_updated"], ["A사-개발"])
+            self.assertEqual(lib.app_full("A사-개발")["target_ai"], 1)
+
+    def test_github_errors(self):
+        from aio_desktop import importer
+        with self.assertRaises(importer.ImportError_):
+            importer.fetch_github("../../etc", "main", "")
+        def deny(req):
+            raise urllib.error.HTTPError(req.full_url, 404, "x", {}, None)
+        with self.assertRaises(importer.ImportError_) as c:
+            importer.fetch_github("me/private", "main", "", opener=deny)
+        self.assertIn("토큰", str(c.exception))
+
+
 class ServerModesTest(unittest.TestCase):
     def test_security_and_jaso_via_api(self):
         with tempfile.TemporaryDirectory() as appdata, tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as exp:
@@ -247,10 +338,26 @@ class ServerModesTest(unittest.TestCase):
             self.assertTrue([e for e in ev["events"] if e["kind"] == "report"])
             self.assertIn("requests", call("/api/fix_task", {})[1]["task"])
             self.assertEqual(call("/api/approve", {})[0], 409)
-            self.assertEqual(call("/api/exp/save", {"title": "로켓", "body": "기록"})[1]["id"], "EXP-01")
+            import io, tarfile
+            with tempfile.TemporaryDirectory() as src:
+                make_repo(Path(src))
+                tb = io.BytesIO()
+                with tarfile.open(fileobj=tb, mode="w:gz") as t:
+                    t.add(src, arcname="me-repo-sha")
+            seen_auth = []
+            httpd.gh_opener = lambda req: (seen_auth.append(req.get_header("Authorization")), tb.getvalue())[1]
+            call("/api/config", {"keys": {"github": "ghp_test"}})
+            self.assertNotIn("ghp_test", json.dumps(call("/api/config")[1]))
+            st, rep = call("/api/import", {"kind": "github", "value": "me/repo", "branch": "main", "auto": True})
+            self.assertEqual(st, 200, rep)
+            self.assertEqual(seen_auth, ["Bearer ghp_test"])
+            self.assertEqual(rep["exp_new"], ["EXP-01", "EXP-02"])
+            self.assertEqual(call("/api/import", {"startup": True})[1]["exp_same"], 2)   # 켤 때 자동: 첫 번째만 실제로 가져옴
+            self.assertTrue(call("/api/import", {"startup": True})[1]["not_run"])
+            self.assertEqual(call("/api/exp/save", {"title": "로켓", "body": "기록"})[1]["id"], "EXP-03")
             draft = call("/api/exp/organize", {"notes": "학회 로켓팀 추력 측정"})[1]
             self.assertIn("[확인 필요", draft["body"])
-            self.assertEqual(len(call("/api/lib")[1]["experiences"]), 1)      # 초안은 저장 안 됨
+            self.assertEqual(len(call("/api/lib")[1]["experiences"]), 3)      # 가져온 2개 + 저장한 1개, 초안은 저장 안 됨
             name = call("/api/app/save", {"company": "회사", "role": "개발", "jd": "공고", "questions": [{"text": "지원동기", "limit": 500}]})[1]["name"]
             self.assertEqual(call("/api/run", {"mode": "jaso", "app": name})[0], 200)
             ev = wait(("waiting_approval", "failed"))

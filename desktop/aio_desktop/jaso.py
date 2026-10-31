@@ -178,10 +178,12 @@ def decision(summary: dict, panel: dict) -> dict:
 
 
 def split_head(text: str) -> tuple[str, str]:
-    """첫 줄(소제목)과 본문을 나눈다. 소제목의 [ ]는 근거 표시가 아니다."""
+    """첫 줄이 [소제목]이면 (소제목, 본문), 아니면 ("", 전체). 소제목의 [ ]는 근거 표시가 아니다."""
     t = text.strip()
-    head, _, body = t.partition("\n")
-    return head.strip(), body
+    first, _, rest = t.partition("\n")
+    if re.fullmatch(r"\[[^\[\]\n]+\]", first.strip()):
+        return first.strip(), rest
+    return "", t
 
 
 def body_tags(text: str) -> set[str]:
@@ -192,7 +194,7 @@ def strip_tags(text: str) -> str:
     """제출용: 본문의 근거 표시만 지운다. 소제목과 [확인 필요]는 그대로 둔다."""
     head, body = split_head(text)
     body = re.sub(r"[ \t]+\n", "\n", TAG.sub("", body)).strip()
-    return (head + "\n" + body).strip() if body else head
+    return (head + "\n" + body).strip() if head else body
 
 
 def count(text: str, mode: str) -> int:

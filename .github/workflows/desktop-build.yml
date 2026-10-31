@@ -1,0 +1,46 @@
+# AI Office Desktop — Windows exe 빌드.
+# desktop/ 아래가 바뀌면 테스트 후 exe를 만들어 아티팩트로 올린다.
+# desktop-v* 태그를 달면 GitHub 릴리스에 exe를 붙여 배포한다.
+name: Desktop build (Windows)
+
+on:
+  push:
+    paths: ["desktop/**", ".github/workflows/desktop-build.yml"]
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 의존성
+        run: python -m pip install --upgrade pip pyinstaller -r requirements.txt
+      - name: 테스트 (가짜 AI로 전체 흐름)
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "ci"
+          python -m unittest -v tests/test_desktop.py
+      - name: exe 만들기
+        run: pyinstaller --noconfirm --onefile --name AIOfficeDesktop --add-data "aio_desktop/static;aio_desktop/static" --hidden-import keyring.backends.Windows run.py
+      - name: exe 자체 점검
+        run: .\dist\AIOfficeDesktop.exe --selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIOfficeDesktop-windows
+          path: desktop/dist/AIOfficeDesktop.exe
+      - name: 릴리스 (태그일 때만)
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/AIOfficeDesktop.exe --title "AI Office Desktop ${GITHUB_REF_NAME#desktop-v}" --notes-file README.md

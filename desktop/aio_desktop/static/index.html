@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Office Desktop</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--ink:#1c2128;--sub:#5c6573;--line:#e2e6ec;--accent:#2457c5;--ok:#1f8a4c;--bad:#c23b2e;--warn:#b26a00}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;background:var(--bg);color:var(--ink);height:100vh;display:flex}
+aside{width:340px;background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow:auto}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+h1{font-size:17px;margin:0 0 4px}
+h2{font-size:13px;margin:18px 0 6px;color:var(--sub);text-transform:uppercase;letter-spacing:.04em}
+label{display:block;font-size:12px;color:var(--sub);margin:8px 0 3px}
+input,select,textarea{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;background:#fff}
+.row{display:flex;gap:6px}
+.row>*{flex:1}
+button{white-space:nowrap;border:0;border-radius:6px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer;background:var(--accent);color:#fff}
+button.ghost{background:#eef1f6;color:var(--ink)}
+button.ok{background:var(--ok)} button.bad{background:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+.hint{font-size:11px;color:var(--sub);margin-top:4px;line-height:1.4}
+.keyset{font-size:11px;color:var(--ok)}
+#feed{flex:1;overflow:auto;padding:18px 22px}
+.msg{display:flex;gap:10px;margin:0 0 12px;max-width:900px}
+.av{width:30px;height:30px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:15px;background:#e8edf6}
+.bub{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;white-space:pre-wrap;font-size:13.5px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.who{font-size:11.5px;color:var(--sub);margin-bottom:2px}
+.user .bub{background:#e9f0ff;border-color:#cddcff}
+.error .bub{border-color:#f0c2bc;background:#fff5f4}
+.test-ok .bub{border-color:#bfe3cc} .test-bad .bub{border-color:#f0c2bc}
+.files{font-size:11.5px;color:var(--sub);margin-top:4px}
+#bar{border-top:1px solid var(--line);background:var(--panel);padding:12px 18px;display:flex;gap:8px;align-items:flex-end}
+#bar textarea{height:62px;resize:vertical}
+#approval{display:none;gap:8px;padding:10px 18px;background:#fffbea;border-top:1px solid #f1e2a8;align-items:center}
+#approval span{flex:1;font-size:13px}
+#diffbox{display:none;position:fixed;inset:5% 8%;background:#0f1419;color:#d6dde6;border-radius:10px;padding:14px;overflow:auto;font:12px/1.45 Consolas,monospace;white-space:pre;z-index:9}
+#diffbox .add{color:#7ee2a8} #diffbox .del{color:#ff9b91} #diffbox .hd{color:#8fb4ff}
+#status{font-size:12px;color:var(--sub);padding:6px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+.empty{color:var(--sub);font-size:13px;line-height:1.7;max-width:640px}
+</style>
+</head>
+<body>
+<aside>
+  <h1>AI Office Desktop</h1>
+  <div class="hint">AI 셋이 기획·구현·리뷰를 나눠 맡고, 마지막 승인은 사람이 합니다. 파일은 고른 작업 폴더 안에서만 바뀝니다.</div>
+
+  <h2>작업 폴더</h2>
+  <div class="row"><input id="workspace" placeholder="C:\projects\my-app"><button class="ghost" style="flex:none" onclick="browse()">찾기</button></div>
+  <label>테스트 명령 (비우면 생략)</label>
+  <input id="test_command" placeholder="예: python -m pytest -q">
+
+  <h2>역할별 AI</h2>
+  <div id="roles"></div>
+
+  <h2>API 키</h2>
+  <div class="hint" id="keystore"></div>
+  <div id="keys"></div>
+
+  <h2>한도</h2>
+  <div class="row">
+    <div><label>작업 수</label><input id="max_tasks" type="number" min="1" max="5"></div>
+    <div><label>수정 라운드</label><input id="max_fix_rounds" type="number" min="0" max="5"></div>
+    <div><label>AI 호출</label><input id="max_calls" type="number" min="3" max="40"></div>
+  </div>
+  <div style="margin-top:14px"><button onclick="save()">설정 저장</button> <span id="saved" class="hint"></span></div>
+</aside>
+
+<main>
+  <div id="status">대기 중</div>
+  <div id="feed"><div class="empty">왼쪽에서 작업 폴더와 역할별 AI, API 키를 정한 뒤 아래에 할 일을 적어 주세요.<br>예: "README에 설치 방법 섹션을 추가하고, 오타를 고쳐 줘"<br><br>바뀐 내용은 '변경 보기'로 확인하고, 승인하면 git 저장소일 경우 새 브랜치에 커밋됩니다. 버리면 원래대로 돌아갑니다.</div></div>
+  <div id="approval"><span id="approvalText">사람 확인 차례입니다.</span>
+    <button class="ghost" onclick="showDiff()">변경 보기</button>
+    <button class="ok" onclick="act('approve')">승인</button>
+    <button class="bad" onclick="act('discard')">버리기</button></div>
+  <div id="bar">
+    <textarea id="task" placeholder="할 일을 적어 주세요 (Ctrl+Enter로 시작)"></textarea>
+    <button id="go" onclick="start()">시작</button>
+    <button class="ghost" onclick="api('/api/stop',{})">멈춤</button>
+  </div>
+</main>
+<div id="diffbox" onclick="this.style.display='none'"></div>
+
+<script>
+const TOKEN="__TOKEN__";
+const ROLES={planner:["팀장 · 기획","🧑‍💼"],builder:["개발 · 구현","👷"],reviewer:["리뷰","🔍"]};
+const ICON={user:"🙋",planner:"🧑‍💼",builder:"👷",reviewer:"🔍",tester:"🧪",system:"⚙️"};
+const NAME={user:"나",planner:"팀장",builder:"개발",reviewer:"리뷰",tester:"테스트",system:"시스템"};
+let PROV={}, since=0, timer=null;
+
+async function api(p,body){
+  const r=await fetch(p,{method:body?"POST":"GET",headers:{"x-token":TOKEN,"content-type":"application/json"},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+  return j;
+}
+function el(t,a={},kids=[]){const e=document.createElement(t);Object.assign(e,a);kids.forEach(k=>e.append(k));return e}
+
+async function load(){
+  const j=await api("/api/config"); PROV=j.providers; const c=j.config;
+  ["workspace","test_command","max_tasks","max_fix_rounds","max_calls"].forEach(k=>document.getElementById(k).value=c[k]??"");
+  const roles=document.getElementById("roles"); roles.innerHTML="";
+  for(const [r,[lab]] of Object.entries(ROLES)){
+    const sel=el("select",{id:"p_"+r}); for(const [k,v] of Object.entries(PROV)) sel.append(el("option",{value:k,textContent:v.label}));
+    sel.value=c.roles[r].provider;
+    const mod=el("input",{id:"m_"+r,value:c.roles[r].model,placeholder:"모델 이름"});
+    sel.onchange=()=>{mod.value=PROV[sel.value].default_model};
+    roles.append(el("label",{textContent:lab}),el("div",{className:"row"},[sel,mod]));
+  }
+  document.getElementById("keystore").textContent="저장 위치: "+j.key_store+". 키는 이 PC에서 각 회사 API로만 보냅니다.";
+  const keys=document.getElementById("keys"); keys.innerHTML="";
+  for(const [k,v] of Object.entries(PROV)){ if(k==="mock")continue;
+    const inp=el("input",{id:"k_"+k,type:"password",placeholder:j.keys_set[k]?"저장됨 · 바꾸려면 새로 입력":"키 입력"});
+    const del=el("button",{className:"ghost",textContent:"삭제",style:"flex:none",onclick:async()=>{await api("/api/config",{keys:{[k]:"__delete__"}});load()}});
+    keys.append(el("label",{innerHTML:v.label+(j.keys_set[k]?' <span class="keyset">● 저장됨</span>':'')}),el("div",{className:"row"},[inp,del]));
+  }
+}
+async function save(){
+  const roles={}; for(const r of Object.keys(ROLES)) roles[r]={provider:document.getElementById("p_"+r).value,model:document.getElementById("m_"+r).value};
+  const keys={}; for(const k of Object.keys(PROV)){ if(k==="mock")continue; const v=document.getElementById("k_"+k).value; if(v) keys[k]=v; }
+  const n=id=>parseInt(document.getElementById(id).value||"0");
+  await api("/api/config",{workspace:document.getElementById("workspace").value.trim(),test_command:document.getElementById("test_command").value,
+    max_tasks:n("max_tasks"),max_fix_rounds:n("max_fix_rounds"),max_calls:n("max_calls"),roles,keys});
+  document.getElementById("saved").textContent="저장했습니다"; setTimeout(()=>document.getElementById("saved").textContent="",2000); load();
+}
+async function browse(){ const j=await api("/api/browse",{}); if(j.path) document.getElementById("workspace").value=j.path; }
+
+function render(ev){
+  const feed=document.getElementById("feed"); if(feed.querySelector(".empty")) feed.innerHTML="";
+  let cls="msg "+(ev.role==="user"?"user":"");
+  if(ev.kind==="error") cls+=" error";
+  if(ev.kind==="test") cls+=ev.ok?" test-ok":" test-bad";
+  const bub=el("div",{className:"bub"});
+  bub.append(el("div",{className:"who",textContent:(NAME[ev.role]||ev.role)+(ev.time?" · "+ev.time:"")}));
+  bub.append(document.createTextNode(ev.text||""));
+  if(ev.files&&ev.files.length) bub.append(el("div",{className:"files",textContent:"바꾼 파일: "+ev.files.join(", ")}));
+  if(ev.usage){ const u=Object.entries(ev.usage).map(([r,x])=>`${NAME[r]||r} ${x.provider}/${x.model}: ${x.calls}회, 입력 ${x.in} · 출력 ${x.out} 토큰`).join("\n");
+    bub.append(el("div",{className:"files",textContent:u})); }
+  feed.append(el("div",{className:cls},[el("div",{className:"av",textContent:ICON[ev.role]||"•"}),bub]));
+  feed.scrollTop=feed.scrollHeight;
+}
+async function poll(){
+  try{
+    const j=await api("/api/events?since="+since);
+    j.events.forEach(e=>{render(e);since=e.i+1});
+    const st={idle:"대기 중",running:"작업 중…",waiting_approval:"사람 확인 대기",failed:"멈춤 · 변경 내용 확인 가능",done:"완료",discarded:"되돌림"}[j.state]||j.state;
+    document.getElementById("status").textContent=st;
+    document.getElementById("approval").style.display=(j.state==="waiting_approval"||j.state==="failed")?"flex":"none";
+    document.getElementById("go").disabled=(j.state==="running"||j.state==="waiting_approval");
+    if(j.state!=="running"&&timer&&j.state!=="idle"){ /* 계속 폴링해 승인 결과까지 받음 */ }
+  }catch(e){ document.getElementById("status").textContent="서버 연결 끊김: "+e.message }
+}
+async function start(){
+  const t=document.getElementById("task").value.trim(); if(!t) return;
+  try{ await save(); since=0; document.getElementById("feed").innerHTML=""; await api("/api/run",{task:t}); document.getElementById("task").value=""; }
+  catch(e){ alertBox(e.message) }
+}
+function alertBox(m){ render({role:"system",kind:"error",text:m,time:""}) }
+async function act(a){ try{ await api("/api/"+a,{}); }catch(e){ alertBox(e.message) } }
+async function showDiff(){
+  const j=await api("/api/diff"); const box=document.getElementById("diffbox"); box.innerHTML="";
+  (j.diff||"(변경 없음)").split("\n").forEach(l=>{ const s=el("div",{textContent:l});
+    if(l.startsWith("+++")||l.startsWith("---")||l.startsWith("@@")) s.className="hd"; else if(l.startsWith("+")) s.className="add"; else if(l.startsWith("-")) s.className="del"; box.append(s)});
+  box.prepend(el("div",{className:"hd",textContent:"바뀐 파일: "+(j.changed||[]).join(", ")+"   (아무 곳이나 누르면 닫힘)"}));
+  box.style.display="block";
+}
+document.getElementById("task").addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.ctrlKey) start(); });
+load(); poll(); timer=setInterval(poll,900);
+</script>
+</body>
+</html>

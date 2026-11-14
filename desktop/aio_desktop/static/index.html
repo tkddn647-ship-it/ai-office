@@ -110,7 +110,7 @@ async function load(){
   }
   document.getElementById("keystore").textContent="저장 위치: "+j.key_store+". 키는 이 PC에서 각 회사 API로만 보냅니다.";
   const keys=document.getElementById("keys"); keys.innerHTML="";
-  for(const [k,v] of Object.entries(PROV)){ if(k==="mock")continue;
+  for(const [k,v] of Object.entries(PROV)){ if(v.no_key)continue;
     const inp=el("input",{id:"k_"+k,type:"password",placeholder:j.keys_set[k]?"저장됨 · 바꾸려면 새로 입력":"키 입력"});
     const del=el("button",{className:"ghost",textContent:"삭제",style:"flex:none",onclick:async()=>{await api("/api/config",{keys:{[k]:"__delete__"}});load()}});
     keys.append(el("label",{innerHTML:v.label+(j.keys_set[k]?' <span class="keyset">● 저장됨</span>':'')}),el("div",{className:"row"},[inp,del]));
@@ -118,7 +118,7 @@ async function load(){
 }
 async function save(){
   const roles={}; for(const r of Object.keys(ROLES)) roles[r]={provider:document.getElementById("p_"+r).value,model:document.getElementById("m_"+r).value};
-  const keys={}; for(const k of Object.keys(PROV)){ if(k==="mock")continue; const v=document.getElementById("k_"+k).value; if(v) keys[k]=v; }
+  const keys={}; for(const k of Object.keys(PROV)){ if(PROV[k].no_key)continue; const v=document.getElementById("k_"+k).value; if(v) keys[k]=v; }
   const n=id=>parseInt(document.getElementById(id).value||"0");
   await api("/api/config",{workspace:document.getElementById("workspace").value.trim(),test_command:document.getElementById("test_command").value,
     max_tasks:n("max_tasks"),max_fix_rounds:n("max_fix_rounds"),max_calls:n("max_calls"),roles,keys});

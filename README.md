@@ -10,7 +10,7 @@ GitHub 이슈에 `ai-office` 라벨을 붙이면 AI 여러 개가 역할을 나�
 | 역할 | 기본 엔진 | 하는 일 |
 |--|--|--|
 | Planner | Claude (`claude -p`) | 이슈를 작업 1~N개로 쪼갬, 모르면 질문 |
-| Builder | Cursor (`cursor-agent -p`) | 작업마다 파일 수정, 작업마다 커밋 |
+| Builder | Cursor (`cursor-agent -p`) 또는 **Codex** (`codex exec`) | 작업마다 파일 수정, 작업마다 커밋 |
 | Reviewer | Claude 또는 **Gemini** (API 직접 호출) | diff·테스트 결과 검토 → `APPROVE` / `REQUEST_CHANGES` |
 | Fixer | (Builder 엔진) | PR 댓글의 수정 요청 반영 |
 
@@ -97,6 +97,22 @@ roles:
   기본 모델 `gemini-flash-latest`, 바꾸려면 role의 `model`.
 - **무료 등급 약관**: 입력·출력이 서비스 개선에 쓰이고 사람 검토자가 볼 수 있다. 개인정보·기밀을 보내지 말 것.
   → 자소서·개인정보 레포는 `gemini_allowed: false` (키 프로젝트에 결제를 켜 유료 등급이면 해당 없음).
+
+## Codex(OpenAI)를 쓸 때
+
+- **GitHub Actions에서는 API 키(`CODEX_API_KEY`, platform.openai.com에서 발급·쓴 만큼 결제)만 쓴다.**
+  OpenAI 문서는 ChatGPT 구독 로그인을 CI 기본값으로 권하지 않고, 공개 레포에는 쓰지 말라고 한다.
+  ChatGPT Plus로 쓰고 싶으면 **AI Office Desktop**(내 컴퓨터)에서 `codex login`으로 로그인해 쓴다.
+- 레포 Secrets에 `CODEX_API_KEY`를 넣고, 레포 워크플로(`templates/ai-office.yml`)가 그 이름으로 넘기게 한다.
+- 키는 job 환경변수에 두지 않는다. 'Run AI Office' 단계에만 `AI_OFFICE_CODEX_KEY`로 넘기고,
+  본체가 시작하자마자 환경변수에서 빼서 **codex 호출에만** 넣는다. 같은 단계에서 도는 테스트·훅은 키를 못 읽는다.
+- 역할별 권한: builder는 `--sandbox workspace-write`(파일 수정), planner·reviewer는 `read-only`. role에 `sandbox:`로 바꿀 수 있다.
+- 예시:
+  ```yaml
+  roles:
+    builder:  {engine: codex, model: "", timeout_sec: 1500, fallback_engine: cursor}
+    reviewer: {engine: codex, timeout_sec: 900}
+  ```
 
 ## 로컬에서 돌려 보기
 

@@ -20,6 +20,8 @@ on:
         required: false
       GEMINI_API_KEY:
         required: false
+      CODEX_API_KEY:          # OpenAI API 키 (codex 엔진). job env에 두지 않고 'Run AI Office' 단계에만 넘긴다
+        required: false
 
 jobs:
   office:
@@ -85,6 +87,7 @@ jobs:
             curl https://cursor.com/install -fsS | bash
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"; echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
           fi
+          python "$OFFICE" --needs-engine codex && npm install -g -s @openai/codex
           # gemini는 설치할 것 없음 (본체가 Gemini API를 직접 호출)
           true
 
@@ -92,12 +95,16 @@ jobs:
         run: |
           python "$OFFICE" --needs-engine claude && claude --version
           python "$OFFICE" --needs-engine cursor && cursor-agent --version
+          python "$OFFICE" --needs-engine codex && codex --version
           true
 
       - name: Repo setup (config의 setup_commands)
         run: python "$OFFICE" --hook setup
 
       - name: Run AI Office
+        env:
+          # 이 단계에만. 본체가 시작하자마자 환경변수에서 빼고 codex 호출에만 넣는다 (테스트·훅이 못 읽게)
+          AI_OFFICE_CODEX_KEY: ${{ secrets.CODEX_API_KEY }}
         run: python "$OFFICE"
 
       - name: Report failure

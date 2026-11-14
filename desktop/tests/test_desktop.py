@@ -166,5 +166,59 @@ class ServerTest(unittest.TestCase):
             httpd.shutdown()
 
 
+class CodexProviderTest(unittest.TestCase):
+    """ChatGPT 구독(Codex CLI 로그인)으로 묻기. 진짜 codex 대신 가짜 실행 결과를 넣는다."""
+
+    def _run(self, stdout, code=0, stderr=""):
+        calls = []
+
+        def runner(cmd, **kw):
+            calls.append((cmd, kw))
+            return subprocess.CompletedProcess(cmd, code, stdout, stderr)
+        return calls, runner
+
+    def test_codex_needs_no_key_and_runs_read_only(self):
+        ok = "\n".join(json.dumps(e) for e in [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": '{"verdict": "APPROVE"}'}},
+            {"type": "turn.completed", "usage": {"input_tokens": 50, "output_tokens": 5}}])
+        calls, runner = self._run(ok)
+        orig = providers.shutil.which
+        providers.shutil.which = lambda name: "/usr/bin/codex"
+        try:
+            text, use = providers.codex_chat("", "시스템", "질문", runner=runner)
+        finally:
+            providers.shutil.which = orig
+        self.assertEqual(json.loads(text)["verdict"], "APPROVE")
+        self.assertEqual(use, {"in": 50, "out": 5})
+        cmd, kw = calls[0]
+        self.assertIn("read-only", cmd)
+        self.assertEqual(cmd[-1], "-")
+        self.assertIn("질문", kw["input"])
+        self.assertFalse(providers.needs_key("codex"))
+        self.assertTrue(providers.needs_key("openai"))
+
+    def test_codex_login_hint(self):
+        bad = json.dumps({"type": "error", "message": "Not logged in. Please run codex login"})
+        calls, runner = self._run(bad, code=1)
+        orig = providers.shutil.which
+        providers.shutil.which = lambda name: "/usr/bin/codex"
+        try:
+            with self.assertRaises(providers.ProviderError) as cm:
+                providers.codex_chat("", "s", "u", runner=runner)
+        finally:
+            providers.shutil.which = orig
+        self.assertIn("codex login", str(cm.exception))
+
+    def test_codex_missing_cli(self):
+        orig = providers.shutil.which
+        providers.shutil.which = lambda name: None
+        try:
+            with self.assertRaises(providers.ProviderError) as cm:
+                providers.chat("codex", "", "", "s", "u")
+        finally:
+            providers.shutil.which = orig
+        self.assertIn("npm install -g @openai/codex", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

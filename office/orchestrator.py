@@ -159,6 +159,66 @@ def run_gemini(prompt: str, role: dict) -> str:
     return text
 
 
+# Codex CLI 키는 시작하자마자 환경변수에서 빼 둔다. 같은 프로세스가 돌리는 테스트·훅이
+# 키를 읽지 못하게, codex를 부를 때만 그 호출의 환경에 넣는다 (OpenAI 문서 권고).
+_CODEX_KEY = os.environ.pop("AI_OFFICE_CODEX_KEY", "") or os.environ.pop("CODEX_API_KEY", "")
+CODEX_WRITE_ROLES = {"builder"}
+
+
+def parse_codex_jsonl(out: str) -> tuple[str, dict, str | None]:
+    """codex exec --json 출력(JSON Lines)에서 마지막 답, 사용량, 오류를 꺼낸다."""
+    text, usage, err = "", {}, None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = ev.get("type", "")
+        item = ev.get("item") or {}
+        if kind == "item.completed" and item.get("type") == "agent_message":
+            text = item.get("text", "") or text
+        elif kind == "turn.completed":
+            u = ev.get("usage") or {}
+            usage = {k: v for k, v in {"input_tokens": u.get("input_tokens"),
+                                       "output_tokens": u.get("output_tokens"),
+                                       "cache_read_input_tokens": u.get("cached_input_tokens")}.items() if v}
+        elif kind in ("turn.failed", "error"):
+            e = ev.get("error") or {}
+            err = (e.get("message") if isinstance(e, dict) else str(e)) or ev.get("message") or line[:300]
+    return text, usage, err
+
+
+def run_codex(prompt: str, role: dict) -> str:
+    """OpenAI Codex CLI (codex exec). 인증: CODEX_API_KEY (API 키, 쓴 만큼 결제).
+    ChatGPT 구독 로그인은 공개 레포 CI에 쓰지 말라는 OpenAI 권고에 따라 Actions에서는 쓰지 않는다.
+    sandbox: builder는 workspace-write(파일 수정), 나머지는 read-only. config의 sandbox로 바꿀 수 있다."""
+    if not _CODEX_KEY:
+        raise RuntimeError("codex: CODEX_API_KEY 가 없습니다 (레포 Secrets에 등록, platform.openai.com의 API 키)")
+    sandbox = role.get("sandbox") or ("workspace-write" if role.get("_role") in CODEX_WRITE_ROLES else "read-only")
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox]
+    if role.get("model"):
+        cmd += ["-m", role["model"]]
+    cmd += role.get("extra_args", []) + ["-"]   # 지시문은 표준입력으로 (길이 제한 없음)
+    env = dict(os.environ, CODEX_API_KEY=_CODEX_KEY)
+    timeout = role.get("timeout_sec", 900)
+    try:
+        p = sh(cmd, check=False, timeout=timeout, input=prompt, env=env)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"codex: {timeout}초 안에 끝나지 않았습니다")
+    except FileNotFoundError:
+        raise RuntimeError("codex 명령을 찾을 수 없습니다. npm install -g @openai/codex")
+    text, usage, err = parse_codex_jsonl(p.stdout)
+    if p.returncode != 0 or err or not text:
+        raise RuntimeError(f"codex 실패 (exit {p.returncode}): {err or (p.stderr or p.stdout)[-2000:]}")
+    _last_meta.clear()
+    _last_meta.update(usage=usage, cost=None, turns=None)
+    log(f"  codex({role.get('model') or '기본 모델'}, {sandbox}) 완료 · usage={usage}")
+    return text
+
+
 def _run_engine(cmd: list[str], role: dict, engine: str, stdin: str | None = None) -> str:
     timeout = role.get("timeout_sec", 900)
     try:
@@ -188,7 +248,7 @@ def _run_engine(cmd: list[str], role: dict, engine: str, stdin: str | None = Non
     return data.get("result", "")
 
 
-ENGINES = {"claude": run_claude, "cursor": run_cursor, "gemini": run_gemini}
+ENGINES = {"claude": run_claude, "cursor": run_cursor, "gemini": run_gemini, "codex": run_codex}
 _last_meta: dict = {}
 USAGE: list[dict] = []   # 이번 실행의 호출별 사용량 → PR에 표로
 
@@ -209,7 +269,7 @@ def check_policy(cfg: dict) -> None:
         sys.exit("이 레포는 gemini_allowed: false 인데 config.yaml에 gemini 역할이 있습니다. 개인정보 보호를 위해 중단합니다.")
     b = (cfg.get("roles") or {}).get("builder") or {}
     if "gemini" in (b.get("engine"), b.get("fallback_engine")):
-        sys.exit("builder에 gemini는 쓸 수 없습니다 (파일을 고치는 도구가 없음). builder는 claude 또는 cursor로.")
+        sys.exit("builder에 gemini는 쓸 수 없습니다 (파일을 고치는 도구가 없음). builder는 claude, cursor, codex 중에서.")
 
 
 def call(role_name: str, prompt: str, cfg: dict) -> str:
@@ -226,6 +286,7 @@ def call(role_name: str, prompt: str, cfg: dict) -> str:
             sub = {k: v for k, v in role.items() if k in ("max_turns", "allowed_tools", "timeout_sec")}
             sub.update(role.get("fallback") or {})
             log(f"  {chain[i - 1]} 실패 → {engine}로 대신 실행")
+        sub["_role"] = role_name   # codex가 역할별 sandbox를 고를 때 쓴다
         log(f"{role_name} → {engine} 호출")
         _last_meta.clear()
         t0, ok = time.time(), False
@@ -253,14 +314,14 @@ def format_usage() -> str:
     if not USAGE:
         return "(호출 없음)"
     lines = ["| 역할 | 엔진 | 입력 토큰 | 캐시 읽기 | 출력 토큰 | 턴 | 시간 |", "|---|---|---|---|---|---|---|"]
-    tot = {"claude": 0, "cursor": 0, "gemini": 0}
+    tot = {"claude": 0, "cursor": 0, "gemini": 0, "codex": 0}
     for u in USAGE:
         us = u["usage"]
         tot[u["engine"]] = tot.get(u["engine"], 0) + 1
         lines.append(f"| {u['role']}{'' if u['ok'] else ' ❌'} | {u['engine']} | {_n(us.get('input_tokens'))} | "
                      f"{_n(us.get('cache_read_input_tokens'))} | {_n(us.get('output_tokens'))} | {_n(u['turns'])} | {u['secs']}s |")
     costs = [u["cost"] for u in USAGE if isinstance(u["cost"], (int, float))]
-    lines.append(f"\n호출 수: Claude {tot.get('claude', 0)}회 · Cursor {tot.get('cursor', 0)}회 · Gemini {tot.get('gemini', 0)}회"
+    lines.append(f"\n호출 수: Claude {tot.get('claude', 0)}회 · Cursor {tot.get('cursor', 0)}회 · Gemini {tot.get('gemini', 0)}회 · Codex {tot.get('codex', 0)}회"
                  + (f" · API 환산 참고값 ${sum(costs):.3f} (구독은 이 금액이 청구되지 않음)" if costs else ""))
     lines.append("토큰이 `-`인 칸은 해당 CLI가 사용량을 알려주지 않은 것입니다.")
     save_log("usage.json", json.dumps(USAGE, ensure_ascii=False, indent=2))

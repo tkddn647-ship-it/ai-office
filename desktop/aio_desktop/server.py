@@ -96,7 +96,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/config":
             cfg = settings.load_config()
             keys = settings.get_keys()
-            return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in PROVIDERS if p != "mock"},
+            return self._send(200, {"config": cfg, "keys_set": {p: bool(keys.get(p)) for p in PROVIDERS if PROVIDERS[p].get("no_key") is not True},
                                     "providers": PROVIDERS, "key_store": settings.key_store()})
         if path == "/api/events":
             since = int((urlparse(self.path).query.split("since=") + ["0"])[1].split("&")[0] or 0)

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from .providers import PROVIDERS
+from .providers import PROVIDERS, needs_key
 
 APP = "AIOfficeDesktop"
 
@@ -79,7 +79,7 @@ def _file_keys() -> dict:
 def get_keys() -> dict:
     out = {}
     for prov in PROVIDERS:
-        if prov == "mock":
+        if not needs_key(prov):
             continue
         v = None
         if _HAS_KEYRING:
@@ -95,7 +95,7 @@ def get_keys() -> dict:
 
 
 def set_key(prov: str, value: str):
-    if prov not in PROVIDERS or prov == "mock":
+    if prov not in PROVIDERS or not needs_key(prov):
         return
     if _HAS_KEYRING:
         try:
